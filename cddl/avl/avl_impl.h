@@ -35,13 +35,10 @@
  */
 
 #include <sys/types.h>
+#include "cddl.h"
 
 #ifdef	__cplusplus
 extern "C" {
-#endif
-
-#ifndef	offsetof
-#define	offsetof(s, m)		((size_t)(&(((s *)0)->m)))
 #endif
 
 /*

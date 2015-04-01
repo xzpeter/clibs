@@ -36,7 +36,6 @@ extern "C" {
 #endif
 
 #include <sys/types.h>
-#include "types.h"
 #include "avl_impl.h"
 
 /*

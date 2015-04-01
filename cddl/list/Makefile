@@ -1,11 +1,11 @@
-PROG=avl_test
+PROG=list_test
 CFLAGS=-g -O0 -I../
 
 .PHONY: clean
 
 default: $(PROG)
 
-$(PROG): avl_test.o avl.o
+$(PROG): list_test.o list.o
 
 clean:
 	@rm -rf *.o $(PROG)
