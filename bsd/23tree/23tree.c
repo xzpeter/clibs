@@ -388,6 +388,54 @@ static void node_dump(tree23_node_t *node, int indent)
 		node_dump(node->childs[3], indent + 1);
 }
 
+static tree23_data_t *node_lookup(tree23_node_t *node, tree23_key_t key)
+{
+	tree23_node_t *next = NULL;
+        tree23_key_cmp_func_t cmp = node->tree->cmp;
+	int result = cmp(node->data[0].key, key);
+	if (result > 0) {
+		next = node->childs[0];
+		goto lookup_next;
+	} else if (result == 0)
+		/* we found it! */
+		return &node->data[0];
+
+	/* so... bigger than 1st item */
+
+	if (node->data[1].key == NULL) {
+		/* no 2nd item */
+		next = node->childs[1];
+		goto lookup_next;
+	}
+
+	/* so... there are 2nd item... */
+
+	result = cmp(node->data[1].key, key);
+	if (result == 0)
+		return &node->data[1];
+	else if (result > 0)
+		next = node->childs[1];
+	else
+		next = node->childs[2];
+
+lookup_next:
+	if (!next)
+		/* possibly this is a leaf node. */
+		return NULL;
+
+	return node_lookup(next, key);
+}
+
+tree23_data_t *tree23_lookup(tree23_t *tree, tree23_key_t key)
+{
+	assert(tree);
+	if (!key)
+		return NULL;
+	if (!tree->root)
+		return NULL;
+	return node_lookup(tree->root, key);
+}
+
 void tree23_dump(tree23_t *tree)
 {
 	assert(tree);

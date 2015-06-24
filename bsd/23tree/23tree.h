@@ -99,7 +99,7 @@ typedef struct tree23_node tree23_node_t;
 tree23_t *tree23_create(tree23_key_cmp_func_t cmp,
 			tree23_data_handler_t destructor);
 
-/* TBD: destroy one 2-3 tree recursively (including data) */
+/* destroy one 2-3 tree recursively (including data) */
 void tree23_destroy(tree23_t *tree);
 
 /* whether the tree is empty or not */
@@ -108,8 +108,8 @@ int tree23_empty(tree23_t *tree);
 /* insert a new item into the tree. */
 int tree23_insert(tree23_t *tree, tree23_key_t key, tree23_value_t value);
 
-/* TBD: search a specific key. If nothing found, return NULL. */
-tree23_value_t tree23_lookup(tree23_t *tree, tree23_key_t key);
+/* search a specific key. If nothing found, return NULL. */
+tree23_data_t *tree23_lookup(tree23_t *tree, tree23_key_t key);
 
 /* TBD: traverse a tree (with sorted order). Handler will be called for each
  * item. */
