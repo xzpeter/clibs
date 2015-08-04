@@ -63,7 +63,7 @@ typedef struct avl_tree avl_tree_t;
 
 /* Creating one AVL tree. `cmp' is required, `destructor' is optional. */
 avl_tree_t *avl_create(avl_node_compare_fn cmp,
-					   avl_node_data_collector destructor);
+                       avl_node_data_collector destructor);
 
 /* Check whether the tree is empty. Return non-zero if empty, else 0. */
 int avl_empty(avl_tree_t *tree);

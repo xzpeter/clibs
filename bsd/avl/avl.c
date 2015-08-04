@@ -65,7 +65,7 @@ static avl_node_t *avl_node_new(avl_node_t *parent, void *data)
 }
 
 avl_tree_t *avl_create(avl_node_compare_fn cmp,
-					   avl_node_data_collector destructor)
+                       avl_node_data_collector destructor)
 {
 	avl_tree_t *tree = NULL;
 
@@ -90,7 +90,7 @@ int avl_empty(avl_tree_t *tree)
 
 /* Replace the pointer in parent node of `node' to `new' */
 static void avl_node_parent_redirect(avl_tree_t *tree, avl_node_t *node,
-									avl_node_t *new)
+                                     avl_node_t *new)
 {
 	avl_node_t *parent = node->an_parent;
 	if (!parent) {
@@ -134,7 +134,7 @@ static void avl_node_update_depth(avl_node_t *node)
 }
 
 static void avl_node_update_depth_recursive(avl_tree_t *tree,
-										   avl_node_t *node)
+                                            avl_node_t *node)
 {
 	avl_node_t *k2 = NULL, *k3 = NULL;
 	int scenario = 0;
