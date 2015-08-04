@@ -50,8 +50,9 @@ static void *avl_alloc(size_t size)
 
 static void avl_free(void *ptr)
 {
-	if (ptr)
+	if (ptr) {
 		free(ptr);
+    }
 }
 
 /* Create new AVL node and initialize */
@@ -69,8 +70,9 @@ avl_tree_t *avl_create(avl_node_compare_fn cmp,
 {
 	avl_tree_t *tree = NULL;
 
-	if (!cmp)
+	if (!cmp) {
 		return NULL;
+    }
 
 	tree = avl_alloc(sizeof(*tree));
 	tree->at_cmp = cmp;
@@ -81,8 +83,9 @@ avl_tree_t *avl_create(avl_node_compare_fn cmp,
 int avl_empty(avl_tree_t *tree)
 {
 	assert(tree);
-	if (tree->at_root)
+	if (tree->at_root) {
 		return 0;
+    }
 	return 1;
 }
 
@@ -111,24 +114,28 @@ static void avl_node_parent_redirect(avl_tree_t *tree, avl_node_t *node,
 static void avl_node_set_left(avl_node_t *node, avl_node_t *left)
 {
 	node->an_left = left;
-	if (left)
+	if (left) {
 		left->an_parent = node;
+    }
 }
 
 static void avl_node_set_right(avl_node_t *node, avl_node_t *right)
 {
 	node->an_right = right;
-	if (right)
+	if (right) {
 		right->an_parent = node;
+    }
 }
 
 static void avl_node_update_depth(avl_node_t *node)
 {
 	int left = 0, right = 0;
-	if (node->an_left)
+	if (node->an_left) {
 		left = node->an_left->an_depth;
-	if (node->an_right)
+    }
+	if (node->an_right) {
 		right = node->an_right->an_depth;
+    }
 	node->an_depth = max2(left, right) + 1;
 	debug("update node %p depth to %d\n", node, node->an_depth);
 }
@@ -141,10 +148,12 @@ static void avl_node_update_depth_recursive(avl_tree_t *tree,
 	int left = 0, right = 0, diff = 0;
 
 	left = right = diff = 0;
-	if (node->an_left)
+	if (node->an_left) {
 		left = node->an_left->an_depth;
-	if (node->an_right)
+    }
+	if (node->an_right) {
 		right = node->an_right->an_depth;
+    }
 
 	/*
 	 * Check whether we need to rebalance the tree. If rebalance is needed,
@@ -253,8 +262,9 @@ static void avl_node_update_depth_recursive(avl_tree_t *tree,
 	}
 
 	/* if node has parent, spread this update event to upper nodes */
-	if (node->an_parent)
+	if (node->an_parent) {
 		avl_node_update_depth_recursive(tree, node->an_parent);
+    }
 }
 
 static int avl_node_insert(avl_tree_t *tree, avl_node_t *node, void *data)
