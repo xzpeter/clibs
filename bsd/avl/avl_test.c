@@ -35,31 +35,31 @@
 
 int int_cmp(void *x, void *y)
 {
-	int a = *(int *)x;
-	int b = *(int *)y;
-	if (a > b) {
-		return 1;
-	} else if (a == b) {
-		return 0;
-	} else {
-		return -1;
-	}
+    int a = *(int *)x;
+    int b = *(int *)y;
+    if (a > b) {
+        return 1;
+    } else if (a == b) {
+        return 0;
+    } else {
+        return -1;
+    }
 }
 
 int main(void)
 {
-	avl_tree_t *tree = NULL;
-	int arr[SIZE] = {0};
-	int i = 0;
+    avl_tree_t *tree = NULL;
+    int arr[SIZE] = {0};
+    int i = 0;
 
-	tree = avl_create(int_cmp, NULL);
+    tree = avl_create(int_cmp, NULL);
 
-	for (i = 0; i < SIZE; i++) {
-		arr[i] = i;
-		avl_insert(tree, arr+i);
-	}
+    for (i = 0; i < SIZE; i++) {
+        arr[i] = i;
+        avl_insert(tree, arr+i);
+    }
 
-	avl_dump(tree);
+    avl_dump(tree);
 
-	return 0;
+    return 0;
 }
