@@ -32,17 +32,17 @@
 #define __AVL_H__
 
 enum avl_errno {
-	AVL_OK = 0,					/* no error */
-	AVL_ERR_EXIST = 1,			/* node exist */
+    AVL_OK = 0,                 /* no error */
+    AVL_ERR_EXIST = 1,          /* node exist */
 };
 
 /* Node of AVL tree. It could be internal node, or leaf node. */
 struct avl_node {
-	void *an_data;
-	int an_depth;
-	struct avl_node *an_parent;
-	struct avl_node *an_left;
-	struct avl_node *an_right;
+    void *an_data;
+    int an_depth;
+    struct avl_node *an_parent;
+    struct avl_node *an_left;
+    struct avl_node *an_right;
 };
 typedef struct avl_node avl_node_t;
 
@@ -53,11 +53,11 @@ typedef void (*avl_node_data_collector) (void *x);
 
 /* The AVL tree. It could contain zero, one or more AVL nodes. */
 struct avl_tree {
-	/* comparing function of node data */
-	avl_node_compare_fn at_cmp;
-	/* destructor of node data */
-	avl_node_data_collector at_dtor;
-	avl_node_t *at_root;
+    /* comparing function of node data */
+    avl_node_compare_fn at_cmp;
+    /* destructor of node data */
+    avl_node_data_collector at_dtor;
+    avl_node_t *at_root;
 };
 typedef struct avl_tree avl_tree_t;
 
