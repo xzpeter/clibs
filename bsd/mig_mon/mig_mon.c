@@ -118,7 +118,7 @@ int mon_server(void)
         last = cur;
         if (delay > max_delay)
             max_delay = delay;
-        printf("\r                                                 \r");
+        printf("\r                                                       \r");
         printf("[%lu] max_delay: %lu (ms), last: %lu (ms)", cur, max_delay,
                delay);
         fflush(stdout);
@@ -135,6 +135,7 @@ int mon_client(const char *server_ip, int interval_ms)
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
     int msg_len = strlen(buf);
+    uint64_t cur = 0;
     int int_us = interval_ms * 1000;
 
     bzero(&addr, sizeof(addr));
@@ -165,8 +166,11 @@ int mon_client(const char *server_ip, int interval_ms)
             close(sock);
             return -1;
         }
-        printf("sending packet to %s:%d, len: %d\n", server_ip,
-               MIG_MON_PORT, msg_len);
+        cur = get_msec();
+        printf("\r                                                  ");
+        printf("\r[%lu] sending packet to %s:%d", cur, server_ip,
+               MIG_MON_PORT);
+        fflush(stdout);
         usleep(int_us);
     }
 
