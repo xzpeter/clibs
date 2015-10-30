@@ -118,9 +118,9 @@ int mon_server(void)
         last = cur;
         if (delay > max_delay)
             max_delay = delay;
-        printf("\r                                                       \r");
-        printf("[%lu] max_delay: %lu (ms), last: %lu (ms)", cur, max_delay,
-               delay);
+        printf("\r                                                       ");
+        printf("\r[%lu] max_delay: %lu (ms), last: %lu (ms)", cur,
+               max_delay, delay);
         fflush(stdout);
     }
     
@@ -193,7 +193,7 @@ int main(int argc, char *argv[])
 
     work_mode = argv[1];
     if (!strcmp(work_mode, "server")) {
-        puts("starting mig_mon server...");
+        puts("starting server mode...");
         ret = mon_server();
     } else if (!strcmp(work_mode, "client")) {
         if (argc < 3) {
