@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -72,6 +73,112 @@ void write_spike_log(int fd, uint64_t delay)
 }
 
 /*
+ * State machine for the event handler. It just starts from 0 until
+ * RUNNING.
+ */
+enum event_state {
+    /* Idle, waiting for first time triggering event */
+    STATE_WAIT_FIRST_TRIGGER = 0,
+    /* Got first event, waiting for the 2nd one */
+    STATE_WAIT_SECOND_TRIGGER = 1,
+    /* Normal running state */
+    STATE_RUNNING = 2,
+    STATE_MAX
+};
+
+/*
+ * This is a state machine to handle the incoming event. Return code
+ * is the state before calling this handler.
+ */
+enum event_state handle_event(int spike_fd)
+{
+    /* Internal static variables */
+    static enum event_state state = STATE_WAIT_FIRST_TRIGGER;
+    static uint64_t last = 0, max_delay = 0;
+    /*
+     * this will store the 1st and 2nd UDP packet latency, as a
+     * baseline of latency values (this is very, very possibly the
+     * value that you provided as interval when you start the
+     * client). This is used to define spikes, using formular:
+     *
+     *         spike_throttle = first_latency * 2
+     */
+    static uint64_t first_latency = 0, spike_throttle = 0;
+
+    /* Temp variables */
+    uint64_t cur = 0, delay = 0;
+    enum event_state old_state = state;
+
+    cur = get_msec();
+
+    if (last) {
+        /*
+         * If this is not exactly the first event we got, we calculate
+         * the delay.
+         */
+        delay = cur - last;
+        assert(delay);
+    }
+
+    switch (state) {
+    case STATE_WAIT_FIRST_TRIGGER:
+        assert(last == 0);
+        assert(max_delay == 0);
+        /*
+         * We need to do nothing here, just to init the "last", which
+         * will be done after the switch().
+         */
+        state++;
+        break;
+
+    case STATE_WAIT_SECOND_TRIGGER:
+        /*
+         * if this is _exactly_ the 2nd packet we got, we need to note
+         * this down as a baseline.
+         */
+        assert(first_latency == 0);
+        first_latency = delay;
+        printf("1st and 2nd packet latency: %lu (ms)\n", first_latency);
+        spike_throttle = delay * 2;
+        printf("Setting spike throttle to: %lu (ms)\n", spike_throttle);
+        if (spike_fd != -1) {
+            printf("Updating spike log initial timestamp\n");
+            /* this -1 is meaningless, shows the init timestamp only. */
+            write_spike_log(spike_fd, -1);
+        }
+        state++;
+        break;
+
+    case STATE_RUNNING:
+        if (delay > max_delay) {
+            max_delay = delay;
+        }
+        /*
+         * if we specified spike_log, we need to log spikes into that
+         * file.
+         */
+        if (spike_fd != -1 && delay >= spike_throttle) {
+            write_spike_log(spike_fd, delay);
+        }
+        printf("\r                                                       ");
+        printf("\r[%lu] max_delay: %lu (ms), cur: %lu (ms)", cur,
+               max_delay, delay);
+        fflush(stdout);
+        break;
+
+    default:
+        printf("Unknown state: %d\n", state);
+        exit(1);
+        break;
+    }
+
+    /* update LAST */
+    last = cur;
+
+    return old_state;
+}
+
+/*
  * spike_log is the file path to store spikes. Spikes will be
  * stored in the form like (for each line):
  *
@@ -88,17 +195,7 @@ int mon_server(const char *spike_log)
     struct sockaddr_in svr_addr, clnt_addr;
     socklen_t addr_len = sizeof(clnt_addr);
     in_addr_t target = -1;
-    uint64_t last = 0, cur = 0, delay = 0, max_delay = 0;
     int spike_fd = -1;
-    /*
-     * this will store the 1st and 2nd UDP packet latency, as a
-     * baseline of latency values (this is very, very possibly the
-     * value that you provided as interval when you start the
-     * client). This is used to define spikes, using formular:
-     *
-     *         spike_throttle = first_latency * 2
-     */
-    uint64_t first_latency = -1, spike_throttle = -1;
 
     if (spike_log) {
         spike_fd = open(spike_log, O_WRONLY | O_CREAT, 0644);
@@ -143,9 +240,6 @@ int mon_server(const char *spike_log)
             return -1;
         }
 
-        /* update CURRENT */
-        cur = get_msec();
-
         if (target == -1) {
             /* this is the first packet we recved. we should init the
                environment and remember the target client we are monitoring
@@ -153,9 +247,8 @@ int mon_server(const char *spike_log)
             printf("setting monitor target to client '%s'\n",
                    inet_ntoa(clnt_addr.sin_addr));
             target = clnt_addr.sin_addr.s_addr;
-            /* also, init LAST */
-            last = cur;
-            max_delay = 0;
+            /* Should be the first time calling */
+            assert(handle_event(spike_fd) == STATE_WAIT_FIRST_TRIGGER);
             continue;
         }
 
@@ -171,37 +264,7 @@ int mon_server(const char *spike_log)
         }
 #endif
 
-        /* this is the packet we want to measure with */
-        delay = cur - last;
-
-        /* if this is _exactly_ the 2nd packet we got, we need to
-         * note this down as a baseline. */
-        if (first_latency == -1) {
-            first_latency = delay;
-            printf("1st and 2nd packet latency: %lu (ms)\n", first_latency);
-            spike_throttle = delay * 2;
-            printf("Setting spike throttle to: %lu (ms)\n", spike_throttle);
-            if (spike_fd != -1) {
-                printf("Updating spike log initial timestamp\n");
-                /* this -1 is meaningless, shows the init timestamp only. */
-                write_spike_log(spike_fd, -1);
-            }
-        }
-
-        /* if we specified spike_log, we need to log spikes into
-         * that file. */
-        if (spike_fd != -1 && delay >= spike_throttle) {
-            write_spike_log(spike_fd, delay);
-        }
-
-        /* update LAST */
-        last = cur;
-        if (delay > max_delay)
-            max_delay = delay;
-        printf("\r                                                       ");
-        printf("\r[%lu] max_delay: %lu (ms), last: %lu (ms)", cur,
-               max_delay, delay);
-        fflush(stdout);
+        handle_event(spike_fd);
     }
     
     return 0;
