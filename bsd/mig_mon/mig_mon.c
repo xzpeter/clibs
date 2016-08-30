@@ -178,6 +178,23 @@ enum event_state handle_event(int spike_fd)
     return old_state;
 }
 
+int spike_log_open(const char *spike_log)
+{
+    int spike_fd = -1;
+
+    if (spike_log) {
+        spike_fd = open(spike_log, O_WRONLY | O_CREAT, 0644);
+        if (spike_fd == -1) {
+            perror("failed to open spike log");
+            /* Silently disable spike log */
+        } else {
+            ftruncate(spike_fd, 0);
+        }
+    }
+
+    return spike_fd;
+}
+
 /*
  * spike_log is the file path to store spikes. Spikes will be
  * stored in the form like (for each line):
@@ -195,16 +212,7 @@ int mon_server(const char *spike_log)
     struct sockaddr_in svr_addr, clnt_addr;
     socklen_t addr_len = sizeof(clnt_addr);
     in_addr_t target = -1;
-    int spike_fd = -1;
-
-    if (spike_log) {
-        spike_fd = open(spike_log, O_WRONLY | O_CREAT, 0644);
-        if (spike_fd == -1) {
-            perror("failed to open spike log");
-            return -1;
-        }
-        ftruncate(spike_fd, 0);
-    }
+    int spike_fd = spike_log_open(spike_log);
 
     bzero(&svr_addr, sizeof(svr_addr));
     bzero(&clnt_addr, sizeof(clnt_addr));
