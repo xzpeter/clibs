@@ -195,6 +195,53 @@ int spike_log_open(const char *spike_log)
     return spike_fd;
 }
 
+/* Mig_mon callbacks. Return 0 for continue, non-zero for errors. */
+typedef int (*mon_server_cbk)(int sock, int spike_fd);
+
+int mon_server_callback(int sock, int spike_fd)
+{
+    static in_addr_t target = -1;
+    int ret;
+    char buf[BUF_LEN];
+    struct sockaddr_in clnt_addr = {};
+    socklen_t addr_len = sizeof(clnt_addr);
+
+    ret = recvfrom(sock, buf, BUF_LEN, 0, (struct sockaddr *)&clnt_addr,
+                   &addr_len);
+    if (ret == -1) {
+        perror("recvfrom() error");
+        return -1;
+    }
+
+    if (target == -1) {
+        /* this is the first packet we recved. we should init the
+           environment and remember the target client we are monitoring
+           for this round. */
+        printf("setting monitor target to client '%s'\n",
+               inet_ntoa(clnt_addr.sin_addr));
+        target = clnt_addr.sin_addr.s_addr;
+        /* Should be the first time calling */
+        assert(handle_event(spike_fd) == STATE_WAIT_FIRST_TRIGGER);
+        return 0;
+    }
+
+#if MIG_MON_SINGLE_CLIENT
+    /* this is not the first packet we received, we will only monitor
+       the target client, and disgard all the other packets recved. */
+    if (clnt_addr.sin_addr.s_addr != target) {
+        printf("\nWARNING: another client (%s:%d) is connecting...\n",
+               inet_ntoa(clnt_addr.sin_addr),
+               ntohs(clnt_addr.sin_port));
+        /* disgard it! */
+        return 0;
+    }
+#endif
+
+    handle_event(spike_fd);
+
+    return 0;
+}
+
 /*
  * spike_log is the file path to store spikes. Spikes will be
  * stored in the form like (for each line):
@@ -204,18 +251,12 @@ int spike_log_open(const char *spike_log)
  * Here, A is the timestamp in seconds. B is the latency value in
  * ms.
  */
-int mon_server(const char *spike_log)
+int mon_server(const char *spike_log, mon_server_cbk server_callback)
 {
-    char buf[BUF_LEN];
     int sock = 0;
     int ret = 0;
-    struct sockaddr_in svr_addr, clnt_addr;
-    socklen_t addr_len = sizeof(clnt_addr);
-    in_addr_t target = -1;
+    struct sockaddr_in svr_addr = {};
     int spike_fd = spike_log_open(spike_log);
-
-    bzero(&svr_addr, sizeof(svr_addr));
-    bzero(&clnt_addr, sizeof(clnt_addr));
 
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
@@ -241,41 +282,13 @@ int mon_server(const char *spike_log)
 #endif
 
     while (1) {
-        ret = recvfrom(sock, buf, BUF_LEN, 0, (struct sockaddr *)&clnt_addr,
-                       &addr_len);
-        if (ret == -1) {
-            perror("recvfrom() error");
-            return -1;
+        ret = server_callback(sock, spike_fd);
+        if (ret) {
+            break;
         }
-
-        if (target == -1) {
-            /* this is the first packet we recved. we should init the
-               environment and remember the target client we are monitoring
-               for this round. */
-            printf("setting monitor target to client '%s'\n",
-                   inet_ntoa(clnt_addr.sin_addr));
-            target = clnt_addr.sin_addr.s_addr;
-            /* Should be the first time calling */
-            assert(handle_event(spike_fd) == STATE_WAIT_FIRST_TRIGGER);
-            continue;
-        }
-
-#if MIG_MON_SINGLE_CLIENT
-        /* this is not the first packet we received, we will only monitor
-           the target client, and disgard all the other packets recved. */
-        if (clnt_addr.sin_addr.s_addr != target) {
-            printf("\nWARNING: another client (%s:%d) is connecting...\n",
-                   inet_ntoa(clnt_addr.sin_addr),
-                   ntohs(clnt_addr.sin_port));
-            /* disgard it! */
-            continue;
-        }
-#endif
-
-        handle_event(spike_fd);
     }
-    
-    return 0;
+
+    return ret;
 }
 
 int mon_client(const char *server_ip, int interval_ms)
@@ -349,7 +362,7 @@ int main(int argc, char *argv[])
         if (argc >= 3) {
             spike_log = argv[2];
         }
-        ret = mon_server(spike_log);
+        ret = mon_server(spike_log, mon_server_callback);
     } else if (!strcmp(work_mode, "client")) {
         if (argc < 3) {
             usage();
