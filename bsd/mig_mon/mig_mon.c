@@ -16,6 +16,7 @@
 #define  MIG_MON_PORT                (12323)
 #define  MIG_MON_INT_DEF             (1000)
 #define  BUF_LEN                     (1024)
+#define  MIG_MON_SPIKE_LOG_DEF       ("/tmp/spike.log")
 
 static const char *prog_name = NULL;
 
@@ -77,8 +78,7 @@ void write_spike_log(int fd, uint64_t delay)
  * A,B
  *
  * Here, A is the timestamp in seconds. B is the latency value in
- * ms. If it is NULL, then no log is written at all (which is the
- * default behavior).
+ * ms.
  */
 int mon_server(const char *spike_log)
 {
@@ -263,7 +263,7 @@ int main(int argc, char *argv[])
     int interval_ms = MIG_MON_INT_DEF;
     const char *work_mode = NULL;
     const char *server_ip = NULL;
-    const char *spike_log = NULL;
+    const char *spike_log = MIG_MON_SPIKE_LOG_DEF;
 
     prog_name = argv[0];
 
