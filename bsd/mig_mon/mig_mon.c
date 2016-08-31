@@ -197,6 +197,7 @@ int spike_log_open(const char *spike_log)
 
 /* Mig_mon callbacks. Return 0 for continue, non-zero for errors. */
 typedef int (*mon_server_cbk)(int sock, int spike_fd);
+typedef int (*mon_client_cbk)(int sock, int spike_fd, int interval_ms);
 
 int mon_server_callback(int sock, int spike_fd)
 {
@@ -291,16 +292,40 @@ int mon_server(const char *spike_log, mon_server_cbk server_callback)
     return ret;
 }
 
-int mon_client(const char *server_ip, int interval_ms)
+int mon_client_callback(int sock, int spike_fd, int interval_ms)
 {
+    int ret;
+    uint64_t cur;
     char buf[BUF_LEN] = "echo";
-    int ret = 0;
+    int msg_len = strlen(buf);
+    int int_us = interval_ms * 1000;
+
+    ret = sendto(sock, buf, msg_len, 0, NULL, 0);
+    if (ret == -1) {
+        perror("sendto() failed");
+        close(sock);
+        return -1;
+    } else if (ret != msg_len) {
+        printf("sendto() returned %d?\n", ret);
+        close(sock);
+        return -1;
+    }
+    cur = get_msec();
+    printf("\r                                                  ");
+    printf("\r[%lu] sending packet to server", cur);
+    fflush(stdout);
+    usleep(int_us);
+
+    return 0;
+}
+
+int mon_client(const char *server_ip, int interval_ms,
+               char *spike_log, mon_client_cbk client_callback)
+{
+    int ret;
     int sock = 0;
     struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
-    int msg_len = strlen(buf);
-    uint64_t cur = 0;
-    int int_us = interval_ms * 1000;
+    int spike_fd = spike_log_open(spike_log);
 
     bzero(&addr, sizeof(addr));
 
@@ -318,27 +343,20 @@ int mon_client(const char *server_ip, int interval_ms)
         return -1;
     }
 
-    while (1) {
-        ret = sendto(sock, buf, msg_len, 0, (struct sockaddr *)&addr,
-                     addr_len);
-        if (ret == -1) {
-            perror("sendto() failed");
-            close(sock);
-            return -1;
-        } else if (ret != msg_len) {
-            printf("sendto() returned %d?\n", ret);
-            close(sock);
-            return -1;
-        }
-        cur = get_msec();
-        printf("\r                                                  ");
-        printf("\r[%lu] sending packet to %s:%d", cur, server_ip,
-               MIG_MON_PORT);
-        fflush(stdout);
-        usleep(int_us);
+    ret = connect(sock, (const struct sockaddr *)&addr, sizeof(addr));
+    if (ret) {
+        perror("connect() failed");
+        return -1;
     }
 
-    return 0;
+    while (1) {
+        ret = client_callback(sock, spike_fd, interval_ms);
+        if (ret) {
+            break;
+        }
+    }
+
+    return ret;
 }
 
 int main(int argc, char *argv[])
@@ -374,7 +392,7 @@ int main(int argc, char *argv[])
         }
         puts("starting client mode...");
         printf("server ip: %s, interval: %d (ms)\n", server_ip, interval_ms);
-        ret = mon_client(server_ip, interval_ms);
+        ret = mon_client(server_ip, interval_ms, NULL, mon_client_callback);
     } else {
         usage();
         return -1;
