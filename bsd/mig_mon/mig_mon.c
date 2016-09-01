@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <fcntl.h>
+#include <errno.h>
 
 /* whether allow client change its IP */
 #define  MIG_MON_SINGLE_CLIENT       (0)
@@ -25,11 +26,14 @@ void usage(void)
 {
     printf("usage: %s server [spike_log]\n", prog_name);
     printf("       %s client server_ip [interval_ms]\n", prog_name);
+    printf("       %s server_rr\n", prog_name);
+    printf("       %s client_rr server_ip [interval_ms [spike_log]]\n",
+           prog_name);
     puts("");
     puts("This is a program that could be used to measure");
     puts("VM migration down time. Please specify work mode.");
     puts("");
-    puts("Example usage to measure guest server downtime:");
+    puts("Example usage to measure guest server downtime (single way):");
     puts("");
     printf("1. [on guest]  start server using '%s server /tmp/spike.log'\n",
            prog_name);
@@ -39,6 +43,19 @@ void usage(void)
     printf("   this starts sending UDP packets to server, interval 50ms.\n");
     printf("3. trigger loop migration (e.g., 100 times)\n");
     printf("4. see the results on server side.\n");
+    puts("");
+    puts("Example usage to measure round-trip downtime:");
+    puts("(This is preferred since it simulates a simplest server behavior)");
+    puts("");
+    printf("1. [on guest]  start server using '%s server_rr'\n",
+           prog_name);
+    printf("   this will start a UDP echo server.\n");
+    printf("2. [on client] start client using '%s client GUEST_IP 50 spike.log'\n",
+           prog_name);
+    printf("   this starts sending UDP packets to server, then try to recv it.\n");
+    printf("   the timeout of recv() will be 50ms.\n");
+    printf("3. trigger loop migration (e.g., 100 times)\n");
+    printf("4. see the results on client side.\n");
 }
 
 uint64_t get_msec(void)
@@ -243,6 +260,38 @@ int mon_server_callback(int sock, int spike_fd)
     return 0;
 }
 
+/* This is actually a udp ECHO server. */
+int mon_server_rr_callback(int sock, int spike_fd)
+{
+    int ret;
+    char buf[BUF_LEN];
+    struct sockaddr_in clnt_addr = {};
+    socklen_t addr_len = sizeof(clnt_addr);
+    uint64_t cur;
+
+    ret = recvfrom(sock, buf, BUF_LEN, 0, (struct sockaddr *)&clnt_addr,
+                   &addr_len);
+    if (ret == -1) {
+        perror("recvfrom() error");
+        return -1;
+    }
+
+    ret = sendto(sock, buf, ret, 0, (struct sockaddr *)&clnt_addr,
+                 addr_len);
+    if (ret == -1) {
+        perror("sendto() error");
+        return -1;
+    }
+
+    cur = get_msec();
+
+    printf("\r                                                  ");
+    printf("\r[%lu] responding to client", cur);
+    fflush(stdout);
+
+    return 0;
+}
+
 /*
  * spike_log is the file path to store spikes. Spikes will be
  * stored in the form like (for each line):
@@ -303,11 +352,9 @@ int mon_client_callback(int sock, int spike_fd, int interval_ms)
     ret = sendto(sock, buf, msg_len, 0, NULL, 0);
     if (ret == -1) {
         perror("sendto() failed");
-        close(sock);
         return -1;
     } else if (ret != msg_len) {
         printf("sendto() returned %d?\n", ret);
-        close(sock);
         return -1;
     }
     cur = get_msec();
@@ -319,10 +366,77 @@ int mon_client_callback(int sock, int spike_fd, int interval_ms)
     return 0;
 }
 
-int mon_client(const char *server_ip, int interval_ms,
-               char *spike_log, mon_client_cbk client_callback)
+int socket_set_timeout(int sock, int timeout_ms)
+{
+    return setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                      (void *)&timeout_ms, sizeof(int));
+}
+
+int mon_client_rr_callback(int sock, int spike_fd, int interval_ms)
 {
     int ret;
+    uint64_t cur;
+    char buf[BUF_LEN] = "echo";
+    int msg_len = strlen(buf);
+    static int init = 0;
+    static uint64_t last = 0;
+
+    if (!init) {
+        printf("Setting socket recv timeout to %d (ms)\n",
+               interval_ms);
+        socket_set_timeout(sock, interval_ms);
+        init = 1;
+    }
+
+    cur = get_msec();
+
+    if (last) {
+        /*
+         * This is not the first packet, we need to wait until we
+         * reaches the interval.
+         */
+        int64_t delta = last + interval_ms - cur;
+        if (delta > 0) {
+            usleep(delta * 1000);
+        }
+    }
+
+    last = get_msec();
+
+    ret = sendto(sock, buf, msg_len, 0, NULL, 0);
+    if (ret == -1) {
+        perror("sendto() failed");
+        return -1;
+    } else if (ret != msg_len) {
+        printf("sendto() returned %d?\n", ret);
+        return -1;
+    }
+
+    ret = recvfrom(sock, buf, msg_len, 0, NULL, 0);
+    if (ret == -1) {
+        if (errno == ECONNREFUSED) {
+            /*
+             * This is when server is down, e.g., due to migration. So
+             * this is okay.
+             */
+            return 0;
+        } else {
+            printf("recvfrom() ERRNO: %d\n", errno);
+        }
+    } else if (ret != msg_len) {
+        printf("recvfrom() returned %d?\n", ret);
+        return -1;
+    }
+
+    handle_event(spike_fd);
+
+    return 0;
+}
+
+int mon_client(const char *server_ip, int interval_ms,
+               const char *spike_log, mon_client_cbk client_callback)
+{
+    int ret = -1;
     int sock = 0;
     struct sockaddr_in addr;
     int spike_fd = spike_log_open(spike_log);
@@ -339,14 +453,14 @@ int mon_client(const char *server_ip, int interval_ms,
     addr.sin_port = MIG_MON_PORT;
     if (inet_aton(server_ip, &addr.sin_addr) != 1) {
         printf("server ip '%s' invalid\n", server_ip);
-        close(sock);
-        return -1;
+        ret = -1;
+        goto close_sock;
     }
 
     ret = connect(sock, (const struct sockaddr *)&addr, sizeof(addr));
     if (ret) {
         perror("connect() failed");
-        return -1;
+        goto close_sock;
     }
 
     while (1) {
@@ -356,6 +470,8 @@ int mon_client(const char *server_ip, int interval_ms,
         }
     }
 
+close_sock:
+    close(sock);
     return ret;
 }
 
@@ -393,6 +509,23 @@ int main(int argc, char *argv[])
         puts("starting client mode...");
         printf("server ip: %s, interval: %d (ms)\n", server_ip, interval_ms);
         ret = mon_client(server_ip, interval_ms, NULL, mon_client_callback);
+    } else if (!strcmp(work_mode, "server_rr")) {
+        printf("starting server_rr...\n");
+        ret = mon_server(NULL, mon_server_rr_callback);
+    } else if (!strcmp(work_mode, "client_rr")) {
+        if (argc < 3) {
+            usage();
+            return -1;
+        }
+        server_ip = argv[2];
+        if (argc >= 4) {
+            interval_ms = strtol(argv[3], NULL, 10);
+        }
+        if (argc >= 5) {
+            spike_log = argv[4];
+        }
+        ret = mon_client(server_ip, interval_ms, spike_log,
+                         mon_client_rr_callback);
     } else {
         usage();
         return -1;
