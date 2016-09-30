@@ -1,7 +1,13 @@
 obj-m += hello.o
 
+#LINUX_ROOT=/root/git/linux
+
+ifndef LINUX_ROOT
+LINUX_ROOT=/lib/modules/$(shell uname -r)/build
+endif
+
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	make -C $(LINUX_ROOT) M=$(PWD) modules
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	make -C $(LINUX_ROOT) M=$(PWD) clean
