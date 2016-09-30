@@ -1,1 +1,11 @@
 This is the device driver for QEMU edu device (hw/misc/edu.c).
+
+To compile the driver, "make" would suffice.
+
+To test the driver, one needs to start VM with edu device, e.g.:
+
+  qemu-system-x86_64 -enable-kvm -m 2048 -device edu
+
+Then load the driver. Have fun!
+
+-- peterx
