@@ -26,6 +26,20 @@ void usage(const char *name)
     printf("If only one device is specified, only dump device info.\n");
 }
 
+void wait_user(void)
+{
+    char c;
+
+    printf("Please hit <enter> to continue... ");
+
+    while (1) {
+        c = getchar();
+        if (c == '\n') {
+            break;
+        }
+    }
+}
+
 int iommu_group_get(const char *pci_addr)
 {
     char buf[512], buf2[512], *ptr;
@@ -285,6 +299,7 @@ int main(int argc, const char *argv[])
         pci_addr = argv[next++];
         printf("Found extra device '%s', binding to same group\n",
                pci_addr);
+        wait_user();
         group = vfio_container_bind_device(container, pci_addr);
         if (group < 0) {
             return -1;
@@ -293,6 +308,9 @@ int main(int argc, const char *argv[])
             return -1;
         }
     }
+
+    printf("Releasing all devices\n");
+    wait_user();
 
     return 0;
 }
