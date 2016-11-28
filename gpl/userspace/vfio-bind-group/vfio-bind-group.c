@@ -10,8 +10,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define DBG printf
-
 char buf[1024];
 
 int is_pci_addr(const char *addr)
@@ -36,14 +34,11 @@ int iommu_group_get(const char *pci_addr)
     len = snprintf(buf, sizeof(buf) - 1, "/sys/bus/pci/devices/0000:%s/iommu_group",
                    pci_addr);
     buf[len] = 0;
-    DBG("parse group %s\n", buf);
 
     len = readlink(buf, buf2, sizeof(buf2));
     buf2[len] = 0;
-    DBG("parsed group path %s\n", buf2);
 
     ptr = strrchr(buf2, '/');
-    DBG("group ptr: %s\n", ptr);
     group = strtol(ptr + 1, NULL, 10);
 
     return group;
