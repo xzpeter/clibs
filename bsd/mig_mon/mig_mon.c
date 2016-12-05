@@ -134,7 +134,6 @@ enum event_state handle_event(int spike_fd)
          * the delay.
          */
         delay = cur - last;
-        assert(delay);
     }
 
     switch (state) {
