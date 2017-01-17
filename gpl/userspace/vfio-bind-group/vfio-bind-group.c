@@ -10,7 +10,11 @@
 #include <string.h>
 #include <unistd.h>
 
+#define MAX_GROUP_N (128)
+
 char buf[1024];
+int group_list[MAX_GROUP_N] = {};
+int group_count = 0;
 
 int is_pci_addr(const char *addr)
 {
@@ -82,6 +86,14 @@ int vfio_device_dump(int group, const char *pci_addr)
     int ret, device, i;
     char buf[512];
     struct vfio_device_info device_info = { .argsz = sizeof(device_info) };
+
+    /*
+     * FIXME: skip device dump now, since if with that,
+     * VFIO_GROUP_UNSET_CONTAINER will fail. See
+     * vfio_group_unset_container(), container_users will be 2, and
+     * it's not allowed by current UNSET.
+    */
+    return 0;
 
     /* Get a file descriptor for the device */
     ret = snprintf(buf, sizeof(buf) - 1, "0000:%s", pci_addr);
@@ -204,6 +216,8 @@ int vfio_container_bind_device(int container, const char *pci_addr)
         return -1;
     }
 
+    group_list[group_count++] = group;
+
     return group;
 }
 
@@ -228,13 +242,14 @@ int vfio_container_init(void)
     return container;
 }
 
+#define DMA_SIZE (1 * 1024 * 1024)
+
 int vfio_container_do_map(int container)
 {
     int ret;
     struct vfio_iommu_type1_dma_map dma_map = { .argsz = sizeof(dma_map) };
 
     /* Allocate some space and setup a DMA mapping */
-#define DMA_SIZE (1 * 1024 * 1024)
     dma_map.vaddr = (uint64_t)mmap(0, DMA_SIZE, PROT_READ | PROT_WRITE,
                                    MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
     if (dma_map.vaddr == (uint64_t)MAP_FAILED) {
@@ -248,6 +263,36 @@ int vfio_container_do_map(int container)
     ret = ioctl(container, VFIO_IOMMU_MAP_DMA, &dma_map);
     if (ret) {
         perror("ioctl() MAP_DMA failed");
+        return -1;
+    }
+
+    return 0;
+}
+
+int vfio_container_do_unmap(int container)
+{
+    struct vfio_iommu_type1_dma_unmap unmap = {
+        .argsz = sizeof(unmap),
+        .flags = 0,
+        .iova = 0,
+        .size = DMA_SIZE,
+    };
+
+    if (ioctl(container, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
+        perror("ioctl() UNMAP_DMA failed");
+        return -1;
+    }
+
+    return 0;
+}
+
+int vfio_group_unset_container(int group, int container)
+{
+    int ret;
+
+    ret = ioctl(group, VFIO_GROUP_UNSET_CONTAINER, &container);
+    if (ret) {
+        perror("ioctl() GROUP_UNSET_CONTAINER failed");
         return -1;
     }
 
@@ -305,6 +350,23 @@ int main(int argc, const char *argv[])
             return -1;
         }
         if (vfio_device_dump(group, pci_addr)) {
+            return -1;
+        }
+    }
+
+    if (vfio_container_do_unmap(container)) {
+        return -1;
+    }
+
+    /*
+     * Finally, remove the devices from the container
+     */
+    for (next = 0; next < group_count; next++) {
+        printf("==================\n");
+        printf("Removing group %d from container\n", next);
+        wait_user();
+        ret = vfio_group_unset_container(group_list[next], container);
+        if (ret < 0) {
             return -1;
         }
     }
