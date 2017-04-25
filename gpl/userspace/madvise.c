@@ -37,7 +37,7 @@ int main(void)
 
     printf("buf[1] = %d\n", buf[1]);
     buf[1] = 1;
-    printf("buf[1] = %d (after write)\n");
+    printf("buf[1] = %d (after write)\n", buf[1]);
 
     return 0;
 }
