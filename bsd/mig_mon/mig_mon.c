@@ -19,16 +19,14 @@
 #define  MIG_MON_INT_DEF             (1000)
 #define  BUF_LEN                     (1024)
 #define  MIG_MON_SPIKE_LOG_DEF       ("/tmp/spike.log")
+#define  DEF_MM_DIRTY_SIZE           (512)
 
 static const char *prog_name = NULL;
 
 void usage(void)
 {
-    printf("usage: %s server [spike_log]\n", prog_name);
-    printf("       %s client server_ip [interval_ms]\n", prog_name);
-    printf("       %s server_rr\n", prog_name);
-    printf("       %s client_rr server_ip [interval_ms [spike_log]]\n",
-           prog_name);
+    puts("");
+    puts("======== VM Migration Downtime Measurement ========");
     puts("");
     puts("This is a program that could be used to measure");
     puts("VM migration down time. Please specify work mode.");
@@ -56,6 +54,23 @@ void usage(void)
     printf("   the timeout of recv() will be 50ms.\n");
     printf("3. trigger loop migration (e.g., 100 times)\n");
     printf("4. see the results on client side.\n");
+    puts("");
+
+    puts("======== Memory Dirty Workload ========");
+    puts("");
+    puts("This tool can also generate dirty memory workload in different ways.");
+    puts("Please see the command 'mm_dirty' for more information.");
+    puts("");
+
+    printf("usage: %s server [spike_log]\n", prog_name);
+    printf("       %s client server_ip [interval_ms]\n", prog_name);
+    printf("       %s server_rr\n", prog_name);
+    printf("       %s client_rr server_ip [interval_ms [spike_log]]\n",
+           prog_name);
+    puts("");
+    printf("       %s mm_dirty [mm_size in MB [dirty_rate in MB/s]]\n", prog_name);
+    printf("       \t\t(default mm_size=%dMB, dirty_rate=max)\n", DEF_MM_DIRTY_SIZE);
+    puts("");
 }
 
 uint64_t get_msec(void)
@@ -474,6 +489,73 @@ close_sock:
     return ret;
 }
 
+#define N_1M (1024 * 1024)
+
+int mon_mm_dirty(long mm_size, long dirty_rate)
+{
+    char *mm_buf, *mm_ptr, *mm_end;
+    long page_size = getpagesize();
+    long pages_per_mb = N_1M / page_size;
+    uint64_t time_iter, time_now;
+    unsigned long dirtied_mb = 0;
+    float speed;
+    int i;
+
+    printf("Test memory size: \t%ld (MB)\n", mm_size);
+    printf("Page size: \t\t%ld (Bytes)\n", page_size);
+    if (dirty_rate) {
+        printf("Dirty memory rate: \t%ld (MB/s)\n", dirty_rate);
+    } else {
+        printf("Dirty memory rate: \tMaximum\n");
+    }
+
+    mm_buf = malloc(mm_size * N_1M);
+    if (!mm_buf) {
+        fprintf(stderr, "%s: malloc failed\n", __func__);
+        return -1;
+    }
+    mm_ptr = mm_buf;
+    mm_end = mm_buf + mm_size;
+    time_iter = get_msec();
+
+    puts("+------------------------+");
+    puts("|   Start Dirty Memory   |");
+    puts("+------------------------+");
+
+    while (1) {
+        /* Dirty in MB unit */
+        for (i = 0; i < pages_per_mb; i++) {
+            *mm_ptr = 0x12;
+            mm_ptr += page_size;
+        }
+        if (mm_ptr + N_1M >= mm_end) {
+            mm_ptr = mm_buf;
+        }
+        dirtied_mb++;
+        if (dirty_rate && dirtied_mb >= dirty_rate) {
+            /*
+             * We have dirtied enough, wait for a while until we reach
+             * the next second.
+             */
+            long sleep_ms = 1000 - get_msec() + time_iter;
+            if (sleep_ms > 0) {
+                usleep(sleep_ms * 1000);
+            }
+            while (get_msec() - time_iter < 1000);
+        }
+        time_now = get_msec();
+        if (time_now - time_iter >= 1000) {
+            speed = 1.0 * dirtied_mb / (time_now - time_iter) * 1000;
+            printf("Dirty rate: %.0f (MB/s), duration: %ld (ms)\n",
+                   speed, time_now - time_iter);
+            time_iter = time_now;
+            dirtied_mb = 0;
+        }
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     int ret = 0;
@@ -525,6 +607,15 @@ int main(int argc, char *argv[])
         }
         ret = mon_client(server_ip, interval_ms, spike_log,
                          mon_client_rr_callback);
+    } else if (!strcmp(work_mode, "mm_dirty")) {
+        long dirty_rate = 0, mm_size = DEF_MM_DIRTY_SIZE;
+        if (argc >= 3) {
+            mm_size = atol(argv[2]);
+        }
+        if (argc >= 4) {
+            dirty_rate = atol(argv[3]);
+        }
+        ret = mon_mm_dirty(mm_size, dirty_rate);
     } else {
         usage();
         return -1;
