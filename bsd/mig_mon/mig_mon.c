@@ -515,7 +515,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
         return -1;
     }
     mm_ptr = mm_buf;
-    mm_end = mm_buf + mm_size;
+    mm_end = mm_buf + mm_size * N_1M;
     time_iter = get_msec();
 
     puts("+------------------------+");
@@ -525,10 +525,10 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
     while (1) {
         /* Dirty in MB unit */
         for (i = 0; i < pages_per_mb; i++) {
-            *mm_ptr = 0x12;
+            *mm_ptr += 1;
             mm_ptr += page_size;
         }
-        if (mm_ptr + N_1M >= mm_end) {
+        if (mm_ptr + N_1M > mm_end) {
             mm_ptr = mm_buf;
         }
         dirtied_mb++;
