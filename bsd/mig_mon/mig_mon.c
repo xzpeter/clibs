@@ -493,13 +493,15 @@ close_sock:
 
 int mon_mm_dirty(long mm_size, long dirty_rate)
 {
-    char *mm_buf, *mm_ptr, *mm_end;
+    unsigned char *mm_ptr, *mm_buf, *mm_end;
+    unsigned char cur_val = 1;
     long page_size = getpagesize();
     long pages_per_mb = N_1M / page_size;
     uint64_t time_iter, time_now;
     unsigned long dirtied_mb = 0;
     float speed;
     int i;
+    int first_round = 1;
 
     printf("Test memory size: \t%ld (MB)\n", mm_size);
     printf("Page size: \t\t%ld (Bytes)\n", page_size);
@@ -525,11 +527,21 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
     while (1) {
         /* Dirty in MB unit */
         for (i = 0; i < pages_per_mb; i++) {
-            *mm_ptr += 1;
+            /* Validate memory if not the first round */
+            unsigned char target = cur_val - 1;
+
+            if (!first_round && *mm_ptr != target) {
+                fprintf(stderr, "%s: detected corrupted memory (%d != %d)!\n",
+                        __func__, *mm_ptr, target);
+                exit(-1);
+            }
+            *mm_ptr = cur_val;
             mm_ptr += page_size;
         }
         if (mm_ptr + N_1M > mm_end) {
             mm_ptr = mm_buf;
+            first_round = 0;
+            cur_val++;
         }
         dirtied_mb++;
         if (dirty_rate && dirtied_mb >= dirty_rate) {
@@ -553,6 +565,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
         }
     }
 
+    /* Never reached */
     return 0;
 }
 
