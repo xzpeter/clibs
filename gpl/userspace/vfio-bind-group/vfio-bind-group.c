@@ -310,7 +310,7 @@ int main(int argc, const char *argv[])
         return -1;
     }
 
-    printf("Please press enter to start the test...\n");
+    printf("Prepare to start the test...\n");
     wait_user();
 
     container = vfio_container_init();
@@ -336,6 +336,9 @@ int main(int argc, const char *argv[])
     if (vfio_container_do_map(container)) {
         return -1;
     }
+
+    printf("Pages mapped...\n");
+    wait_user();
 
     /*
      * Then, bind all the rest of the devices into the same IOMMU
