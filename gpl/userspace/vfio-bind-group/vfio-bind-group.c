@@ -310,6 +310,9 @@ int main(int argc, const char *argv[])
         return -1;
     }
 
+    printf("Please press enter to start the test...\n");
+    wait_user();
+
     container = vfio_container_init();
     if (container < 0) {
         return container;
