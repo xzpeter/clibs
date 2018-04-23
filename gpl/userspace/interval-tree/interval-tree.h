@@ -102,7 +102,7 @@ ITRange *it_tree_find(ITTree *tree, ITValue start, ITValue end);
  *
  * Return: same as it_tree_find().
  */
-ITRange *it_tree_find_point(ITTree *tree, ITValue value);
+ITRange *it_tree_find_value(ITTree *tree, ITValue value);
 
 /**
  * it_tree_foreach:
