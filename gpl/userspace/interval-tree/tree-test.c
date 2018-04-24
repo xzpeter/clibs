@@ -37,6 +37,7 @@ int main(void)
     g_assert(it_tree_insert(tree, 40, 59) == 0);
     g_assert(it_tree_insert(tree, 80, 99) == 0);
     g_assert(it_tree_remove(tree, 0, 69) == 0);
+    g_assert(it_tree_remove(tree, 85, 89) == 0);
     it_tree_dump(tree);
     it_tree_destroy(tree);
 

@@ -38,6 +38,24 @@ static int it_tree_compare(gconstpointer a, gconstpointer b, gpointer data)
     return 0;
 }
 
+/* Find out intersection of range A and B, put into OUT */
+static inline void it_range_and(ITRange *out, ITRange *a, ITRange *b)
+{
+    out->start = MAX(a->start, b->start);
+    out->end = MIN(a->end, b->end);
+}
+
+static inline gboolean it_range_equal(ITRange *a, ITRange *b)
+{
+    return a->start == b->start && a->end == b->end;
+}
+
+/* Whether ITRange A is superset of B? */
+static inline gboolean it_range_cover(ITRange *a, ITRange *b)
+{
+    return a->start <= b->start && a->end >= b->end;
+}
+
 ITTree *it_tree_new(void)
 {
     ITTree *ittree = g_new0(ITTree, 1);
@@ -109,7 +127,7 @@ static gboolean it_tree_traverse(gpointer key, gpointer value,
 {
     it_tree_iterator iterator = data;
     ITRange *range = key;
-    
+
     g_assert(key == value);
 
     return iterator(range->start, range->end);
@@ -121,16 +139,66 @@ void it_tree_foreach(ITTree *tree, it_tree_iterator iterator)
     g_tree_foreach(tree->tree, it_tree_traverse, iterator);
 }
 
+/* Remove subset `range', which is part of `overlap'. */
+static void it_tree_remove_subset(GTree *gtree, const ITRange *overlap,
+                                  const ITRange *range)
+{
+    ITRange *range1, *range2;
+
+    if (overlap->start <= range->start - 1) {
+        range1 = g_new0(ITRange, 1);
+        range1->start = overlap->start;
+        range1->end = range->start - 1;
+    } else {
+        range1 = NULL;
+    }
+    if (range->end + 1 < overlap->end) {
+        range2 = g_new0(ITRange, 1);
+        range2->start = range->end + 1;
+        range2->end = overlap->end;
+    } else {
+        range2 = NULL;
+    }
+
+    g_tree_remove(gtree, overlap);
+
+    if (range1) {
+        g_tree_insert(gtree, range1, range1);
+    }
+    if (range2) {
+        g_tree_insert(gtree, range2, range2);
+    }
+}
+
 int it_tree_remove(ITTree *tree, ITValue start, ITValue end)
 {
-    ITRange range = { .start = start, .end = end }, *overlap;
+    ITRange range = { .start = start, .end = end }, *overlap, and;
     GTree *gtree;
 
     g_assert(tree);
 
     gtree = tree->tree;
     while ((overlap = g_tree_lookup(gtree, &range))) {
-        g_tree_remove(gtree, overlap);
+        if (it_range_equal(overlap, &range)) {
+            /* Exactly what we want to remove; done */
+            g_tree_remove(gtree, overlap);
+            break;
+        } else if (it_range_cover(overlap, &range)) {
+            /* Split existing range into two; done */
+            it_tree_remove_subset(gtree, overlap, &range);
+            break;
+        } else if (it_range_cover(&range, overlap)) {
+            /* Drop this range and continue */
+            g_tree_remove(gtree, overlap);
+        } else {
+            /*
+             * The range to remove has intersection with existing
+             * ranges.  Remove part of the range and continue
+             */
+            it_range_and(&and, overlap, &range);
+            g_assert(and.start <= and.end);
+            it_tree_remove_subset(gtree, overlap, &and);
+        }
     }
 
     return IT_OK;
