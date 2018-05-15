@@ -83,9 +83,15 @@ ITRange *it_tree_find_value(ITTree *tree, ITValue value)
     return it_tree_find(tree, value, value);
 }
 
+static inline void it_tree_insert_internal(GTree *gtree, ITRange *range)
+{
+    /* Key and value are sharing the same range data */
+    g_tree_insert(gtree, range, range);
+}
+
 int it_tree_insert(ITTree *tree, ITValue start, ITValue end)
 {
-    ITRange *range = g_new0(ITRange, 1), *overlap;
+    ITRange range, *new, *overlap;
     GTree *gtree;
 
     g_assert(tree);
@@ -93,31 +99,32 @@ int it_tree_insert(ITTree *tree, ITValue start, ITValue end)
 
     gtree = tree->tree;
 
-    range->start = start;
-    range->end = end;
+    range.start = start;
+    range.end = end;
 
     /* We don't allow to insert range that overlaps with existings */
-    if (g_tree_lookup(gtree, range)) {
-        g_free(range);
+    if (g_tree_lookup(gtree, &range)) {
         return IT_ERR_OVERLAP;
     }
 
     /* Merge left adjacent range */
     overlap = it_tree_find_value(tree, start - 1);
     if (overlap) {
-        range->start = overlap->start;
+        range.start = overlap->start;
         g_tree_remove(gtree, overlap);
     }
 
     /* Merge right adjacent range */
     overlap = it_tree_find_value(tree, end + 1);
     if (overlap) {
-        range->end = overlap->end;
+        range.end = overlap->end;
         g_tree_remove(gtree, overlap);
     }
 
-    /* Key and value are sharing the same range data */
-    g_tree_insert(gtree, range, range);
+    new = g_new0(ITRange, 1);
+    new->start = range.start;
+    new->end = range.end;
+    it_tree_insert_internal(gtree, new);
 
     return IT_OK;
 }
@@ -145,14 +152,14 @@ static void it_tree_remove_subset(GTree *gtree, const ITRange *overlap,
 {
     ITRange *range1, *range2;
 
-    if (overlap->start <= range->start - 1) {
+    if (overlap->start < range->start) {
         range1 = g_new0(ITRange, 1);
         range1->start = overlap->start;
         range1->end = range->start - 1;
     } else {
         range1 = NULL;
     }
-    if (range->end + 1 < overlap->end) {
+    if (range->end < overlap->end) {
         range2 = g_new0(ITRange, 1);
         range2->start = range->end + 1;
         range2->end = overlap->end;
@@ -163,10 +170,10 @@ static void it_tree_remove_subset(GTree *gtree, const ITRange *overlap,
     g_tree_remove(gtree, overlap);
 
     if (range1) {
-        g_tree_insert(gtree, range1, range1);
+        it_tree_insert_internal(gtree, range1);
     }
     if (range2) {
-        g_tree_insert(gtree, range2, range2);
+        it_tree_insert_internal(gtree, range2);
     }
 }
 
@@ -179,22 +186,12 @@ int it_tree_remove(ITTree *tree, ITValue start, ITValue end)
 
     gtree = tree->tree;
     while ((overlap = g_tree_lookup(gtree, &range))) {
-        if (it_range_equal(overlap, &range)) {
-            /* Exactly what we want to remove; done */
-            g_tree_remove(gtree, overlap);
-            break;
-        } else if (it_range_cover(overlap, &range)) {
-            /* Split existing range into two; done */
+        if (it_range_cover(overlap, &range)) {
+            /* Split existing range into two if needed; done */
             it_tree_remove_subset(gtree, overlap, &range);
             break;
-        } else if (it_range_cover(&range, overlap)) {
-            /* Drop this range and continue */
-            g_tree_remove(gtree, overlap);
         } else {
-            /*
-             * The range to remove has intersection with existing
-             * ranges.  Remove part of the range and continue
-             */
+            /* Remove intersection and continue */
             it_range_and(&and, overlap, &range);
             g_assert(and.start <= and.end);
             it_tree_remove_subset(gtree, overlap, &and);

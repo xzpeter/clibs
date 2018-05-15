@@ -8,8 +8,8 @@
  *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
  */
-#ifndef __INTERVAL_TREE_H__
-#define __INTERVAL_TREE_H__
+#ifndef INTERVAL_TREE_H
+#define INTERVAL_TREE_H
 
 /*
  * Currently the interval tree will only allow to keep ranges
