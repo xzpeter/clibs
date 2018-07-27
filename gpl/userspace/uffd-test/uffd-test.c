@@ -1,0 +1,324 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <sys/syscall.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <stdint.h>
+#include <pthread.h>
+
+/*
+ * The kernel version I'm testing is still not yet merged; I need my
+ * own header.  When settled, we can include <linux/userfaultfd.h>
+ */
+#include "userfaultfd.h"
+
+typedef unsigned int bool;
+#define BIT(nr)                 (1ULL << (nr))
+#define UFFD_BUFFER_PAGES  (10)
+
+enum test_name {
+    TEST_MISSING = 0,
+    TEST_WP,
+};
+
+static size_t page_size;
+static enum test_name test_name;
+
+static void *uffd_buffer;
+static size_t uffd_buffer_size;
+static int uffd_handle;
+static pthread_t uffd_thread;
+
+static void uffd_test_usage(const char *name)
+{
+    puts("");
+    printf("usage: %s <missing|wp>\n", name);
+    puts("");
+    puts("  missing:\tdo page miss test");
+    puts("  wp:     \tdo page write-protect test");
+    puts("");
+    exit(0);
+}
+
+static int uffd_handle_init(void)
+{
+    struct uffdio_api api_struct = { 0 };
+    uint64_t ioctl_mask = BIT(_UFFDIO_REGISTER) | BIT(_UFFDIO_UNREGISTER);
+
+    int ufd = syscall(__NR_userfaultfd, O_CLOEXEC);
+
+    if (ufd == -1) {
+        printf("%s: UFFD not supported", __func__);
+        return -1;
+    }
+
+    api_struct.api = UFFD_API;
+    /*
+     * For MISSING tests, we don't need any feature bit since it's on
+     * by default.
+     */
+    if (test_name == TEST_WP) {
+        api_struct.features = UFFD_FEATURE_PAGEFAULT_FLAG_WP;
+    }
+
+    if (ioctl(ufd, UFFDIO_API, &api_struct)) {
+        printf("%s: UFFDIO_API failed\n", __func__);
+        return -1;
+    }
+
+    if ((api_struct.ioctls & ioctl_mask) != ioctl_mask) {
+        printf("%s: Missing userfault feature\n", __func__);
+        return -1;
+    }
+
+    uffd_handle = ufd;
+
+    return 0;
+}
+
+static void *uffd_bounce_thread(void *data)
+{
+    int uffd = (int) (uint64_t) data;
+    int served_pages = 0;
+
+    printf("%s: thread created\n", __func__);
+
+    while (served_pages < UFFD_BUFFER_PAGES) {
+        struct uffd_msg msg;
+        ssize_t len = read(uffd, &msg, sizeof(msg));
+
+        if (len == 0) {
+            /* Main thread tells us to quit */
+            break;
+        }
+
+        if (len < 0) {
+            printf("%s: read() failed on uffd: %d\n", __func__, -errno);
+            break;
+        }
+
+        if (msg.event != UFFD_EVENT_PAGEFAULT) {
+            printf("%s: unknown message: %d\n", __func__, msg.event);
+            continue;
+        }
+
+        if (test_name == TEST_WP) {
+            struct uffdio_writeprotect wp = { 0 };
+
+            if (!(msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP)) {
+                printf("%s: WP flag not detected in PF flags"
+                       "for address 0x%llx\n", __func__,
+                       msg.arg.pagefault.address);
+                continue;
+            }
+
+            wp.range.start = msg.arg.pagefault.address;
+            wp.range.len = page_size;
+            /* Undo write-protect, do wakeup after that */
+            wp.mode = 0;
+
+            if (ioctl(uffd, UFFDIO_WRITEPROTECT, &wp)) {
+                printf("%s: Unset WP failed for address 0x%llx\n",
+                       __func__, msg.arg.pagefault.address);
+                continue;
+            }
+
+            printf("%s: Detected WP for page 0x%llx, recovered\n",
+                   __func__, msg.arg.pagefault.address);
+        } else if (test_name == TEST_MISSING) {
+            struct uffdio_zeropage zero = { 0 };
+
+            zero.range.start = msg.arg.pagefault.address;
+            zero.range.len = page_size;
+
+            if (ioctl(uffd, UFFDIO_ZEROPAGE, &zero)) {
+                printf("%s: zero page failed for address 0x%llx\n",
+                       __func__, msg.arg.pagefault.address);
+                continue;
+            }
+
+            printf("%s: Detected missing page 0x%llx, recovered\n",
+                   __func__, msg.arg.pagefault.address);
+        }
+
+        served_pages++;
+    }
+
+    printf("%s: thread quitted\n", __func__);
+
+    return NULL;
+}
+
+static int uffd_do_register(void)
+{
+    int uffd = uffd_handle;
+    struct uffdio_register reg = { 0 };
+
+    reg.range.start = (uint64_t) uffd_buffer;
+    reg.range.len = (uint64_t) uffd_buffer_size;
+
+    if (test_name == TEST_WP) {
+        reg.mode = UFFDIO_REGISTER_MODE_WP;
+    } else if (test_name == TEST_MISSING) {
+        reg.mode = UFFDIO_REGISTER_MODE_MISSING;
+    }
+
+    if (ioctl(uffd, UFFDIO_REGISTER, &reg)) {
+        printf("%s: UFFDIO_REGISTER failed: %d\n", __func__, -errno);
+        return -1;
+    }
+
+    if (test_name == TEST_WP && !(reg.ioctls & BIT(_UFFDIO_WRITEPROTECT))) {
+        printf("%s: wr-protect feature missing\n", __func__);
+        return -1;
+    }
+
+    printf("uffd register completed\n");
+
+    return 0;
+}
+
+static int uffd_test_init(void)
+{
+    assert(uffd_buffer == NULL);
+
+    page_size = getpagesize();
+    uffd_buffer_size = page_size * UFFD_BUFFER_PAGES;
+
+    uffd_buffer = mmap(NULL, uffd_buffer_size, PROT_READ | PROT_WRITE,
+                       MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
+    if (uffd_buffer == MAP_FAILED) {
+        printf("map() failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    if ((uint64_t)uffd_buffer & (page_size - 1)) {
+        printf("mmap() returned unaligned address\n");
+        return -1;
+    }
+
+    if (uffd_handle_init()) {
+        return -1;
+    }
+
+    if (uffd_do_register()) {
+        return -1;
+    }
+
+    if (pthread_create(&uffd_thread, NULL,
+                       uffd_bounce_thread, (void *)(uint64_t)uffd_handle)) {
+        printf("pthread_create() failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    printf("uffd buffer pages: %u\n", UFFD_BUFFER_PAGES);
+    printf("uffd buffer size: %zu\n", uffd_buffer_size);
+    printf("uffd buffer address: %p\n", uffd_buffer);
+
+    return 0;
+}
+
+int uffd_do_write_protect(void)
+{
+    struct uffdio_writeprotect wp;
+
+    wp.range.start = (uint64_t) uffd_buffer;
+    wp.range.len = (uint64_t) uffd_buffer_size;
+    wp.mode = UFFDIO_WRITEPROTECT_MODE_WP;
+
+    if (ioctl(uffd_handle, UFFDIO_WRITEPROTECT, &wp)) {
+        printf("%s: Failed to do write protect\n", __func__);
+        return -1;
+    }
+
+    printf("uffd marking write protect completed\n");
+
+    return 0;
+}
+
+void uffd_test_stop(void)
+{
+    void *retval;
+
+    pthread_join(uffd_thread, &retval);
+
+    close(uffd_handle);
+    uffd_handle = 0;
+
+    munmap(uffd_buffer, uffd_buffer_size);
+    uffd_buffer = NULL;
+}
+
+void uffd_test_loop(void)
+{
+    int i;
+    unsigned int *ptr;
+
+    for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
+        printf("writting to page %d\n", i);
+        ptr = uffd_buffer + i * page_size;
+        *ptr = i;
+    }
+}
+
+int uffd_test_wp(void)
+{
+    if (uffd_do_write_protect()) {
+        return -1;
+    }
+
+    uffd_test_loop();
+
+    return 0;
+}
+
+int uffd_test_missing(void)
+{
+    uffd_test_loop();
+
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    int ret = 0;
+    const char *cmd;
+
+    if (argc < 2) {
+        uffd_test_usage(argv[0]);
+    }
+    cmd = argv[1];
+
+    if (!strcmp(cmd, "missing")) {
+        test_name = TEST_MISSING;
+    } else if (!strcmp(cmd, "wp")) {
+        test_name = TEST_WP;
+    } else {
+        uffd_test_usage(argv[0]);
+    }
+
+    if (uffd_test_init()) {
+        return -1;
+    }
+
+    switch (test_name) {
+    case TEST_MISSING:
+        ret = uffd_test_missing();
+        break;
+    case TEST_WP:
+        ret = uffd_test_wp();
+        break;
+    }
+
+    uffd_test_stop();
+    
+    return ret;
+}
