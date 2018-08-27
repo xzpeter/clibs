@@ -230,6 +230,9 @@ int uffd_do_write_protect(void)
 {
     struct uffdio_writeprotect wp;
 
+    /* Pre-fault the region */
+    memset(uffd_buffer, 0, uffd_buffer_size);
+
     wp.range.start = (uint64_t) uffd_buffer;
     wp.range.len = (uint64_t) uffd_buffer_size;
     wp.mode = UFFDIO_WRITEPROTECT_MODE_WP;
