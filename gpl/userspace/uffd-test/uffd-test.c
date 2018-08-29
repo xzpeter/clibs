@@ -13,6 +13,8 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <time.h>
+#include <poll.h>
+#include <sys/eventfd.h>
 
 /*
  * The kernel version I'm testing is still not yet merged; I need my
@@ -36,6 +38,7 @@ static void *uffd_buffer;
 static size_t uffd_buffer_size;
 static int uffd_handle;
 static pthread_t uffd_thread;
+static int uffd_quit = -1;
 
 static void uffd_test_usage(const char *name)
 {
@@ -53,7 +56,7 @@ static int uffd_handle_init(void)
     struct uffdio_api api_struct = { 0 };
     uint64_t ioctl_mask = BIT(_UFFDIO_REGISTER) | BIT(_UFFDIO_UNREGISTER);
 
-    int ufd = syscall(__NR_userfaultfd, O_CLOEXEC);
+    int ufd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
 
     if (ufd == -1) {
         printf("%s: UFFD not supported", __func__);
@@ -88,12 +91,30 @@ static void *uffd_bounce_thread(void *data)
 {
     int uffd = (int) (uint64_t) data;
     int served_pages = 0;
+    struct pollfd fds[2] = {
+        { .fd = uffd, .events = POLLIN | POLLERR | POLLHUP },
+        { .fd = uffd_quit, .events = POLLIN | POLLERR | POLLHUP },
+    };
 
     printf("%s: thread created\n", __func__);
 
-    while (served_pages < UFFD_BUFFER_PAGES) {
+    while (1) {
         struct uffd_msg msg;
-        ssize_t len = read(uffd, &msg, sizeof(msg));
+        ssize_t len;
+        int ret;
+
+        ret = poll(fds, 2, -1);
+        if (ret < 0) {
+            printf("%s: poll() got error: %d\n", ret);
+            break;
+        }
+
+        if (fds[1].revents) {
+            printf("Thread detected quit signal\n");
+            break;
+        }
+
+        len = read(uffd, &msg, sizeof(msg));
 
         if (len == 0) {
             /* Main thread tells us to quit */
@@ -188,6 +209,8 @@ static int uffd_do_register(void)
 
 static int uffd_test_init(void)
 {
+    uffd_quit = eventfd(0, 0);
+
     assert(uffd_buffer == NULL);
 
     page_size = getpagesize();
@@ -288,7 +311,11 @@ int uffd_do_write_protect(void)
 void uffd_test_stop(void)
 {
     void *retval;
+    uint64_t val = 1;
 
+    /* Tell the thread to go */
+    printf("Telling the thread to quit\n");
+    write(uffd_quit, &val, 8);
     pthread_join(uffd_thread, &retval);
 
     close(uffd_handle);
@@ -296,6 +323,9 @@ void uffd_test_stop(void)
 
     munmap(uffd_buffer, uffd_buffer_size);
     uffd_buffer = NULL;
+
+    close(uffd_quit);
+    uffd_quit = -1;
 }
 
 void uffd_test_loop(void)
