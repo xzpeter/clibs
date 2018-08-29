@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <time.h>
 
 /*
  * The kernel version I'm testing is still not yet merged; I need my
@@ -226,12 +227,49 @@ static int uffd_test_init(void)
     return 0;
 }
 
+enum {
+    WP_PREFAULT_NONE = 0,
+    WP_PREFAULT_READ,
+    WP_PREFAULT_WRITE,
+    WP_PREFAULT_MAX,
+};
+
+char *wp_prefault_str[WP_PREFAULT_MAX] = {
+    "no-prefault", "read-prefault", "write-prefault"
+};
+
 int uffd_do_write_protect(void)
 {
     struct uffdio_writeprotect wp;
+    int i;
+    char buf, *ptr;
 
-    /* Pre-fault the region */
-    memset(uffd_buffer, 0, uffd_buffer_size);
+    /*
+     * Pre-fault the region randomly.  For each page, we choose one of
+     * the three options:
+     *
+     * (1) do nothing; this will keep the PTE empty
+     * (2) read once; this will trigger on-demand paging to fill in
+     *     the zero page PFN into PTE
+     * (3) write once; this will trigger the on-demand paging to fill
+     *     in a real page PFN into PTE
+     */
+    for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
+        int x = random() % 3;
+        printf("prefaulting the page %d by %s\n", i, wp_prefault_str[x]);
+        ptr = uffd_buffer + i * page_size;
+        switch (x) {
+        case WP_PREFAULT_READ:
+            buf = *ptr;
+            break;
+        case WP_PREFAULT_WRITE:
+            *ptr = 1;
+            break;
+        default:
+            /* Do nothing */
+            break;
+        }
+    }
 
     wp.range.start = (uint64_t) uffd_buffer;
     wp.range.len = (uint64_t) uffd_buffer_size;
@@ -294,6 +332,8 @@ int main(int argc, char *argv[])
 {
     int ret = 0;
     const char *cmd;
+
+    srand(time(NULL));
 
     if (argc < 2) {
         uffd_test_usage(argv[0]);
