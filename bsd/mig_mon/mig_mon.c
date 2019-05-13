@@ -13,6 +13,14 @@
 #include <fcntl.h>
 #include <errno.h>
 
+typedef enum {
+    PATTERN_SEQ = 0,
+    PATTERN_RAND = 1,
+    PATTERN_NUM,
+} dirty_pattern;
+
+char *pattern_str[PATTERN_NUM] = { "sequential", "random" };
+
 /* whether allow client change its IP */
 #define  MIG_MON_SINGLE_CLIENT       (0)
 #define  MIG_MON_PORT                (12323)
@@ -20,6 +28,7 @@
 #define  BUF_LEN                     (1024)
 #define  MIG_MON_SPIKE_LOG_DEF       ("/tmp/spike.log")
 #define  DEF_MM_DIRTY_SIZE           (512)
+#define  DEF_MM_DIRTY_PATTERN        PATTERN_SEQ
 
 static const char *prog_name = NULL;
 
@@ -68,9 +77,28 @@ void usage(void)
     printf("       %s client_rr server_ip [interval_ms [spike_log]]\n",
            prog_name);
     puts("");
-    printf("       %s mm_dirty [mm_size in MB [dirty_rate in MB/s]]\n", prog_name);
-    printf("       \t\t(default mm_size=%dMB, dirty_rate=max)\n", DEF_MM_DIRTY_SIZE);
+    printf("       %s mm_dirty [mm_size [dirty_rate [pattern]]]\n",
+           prog_name);
+    printf("       \t mm_size: \tin MB (default: %d)\n", DEF_MM_DIRTY_SIZE);
+    printf("       \t dirty_rate: \tin MB/s (default: unlimited)\n");
+    printf("       \t pattern: \t\"sequential\" or \"random\"\n");
+    printf("       \t          \t(default: \"%s\")\n",
+           pattern_str[DEF_MM_DIRTY_PATTERN]);
     puts("");
+}
+
+dirty_pattern parse_dirty_pattern(const char *str)
+{
+    int i;
+
+    for (i = 0; i < PATTERN_NUM; i++) {
+        if (!strcmp(pattern_str[i], str)) {
+            return i;
+        }
+    }
+
+    fprintf(stderr, "Dirty pattern unknown: %s\n", str);
+    exit(1);
 }
 
 uint64_t get_msec(void)
@@ -491,14 +519,14 @@ close_sock:
 
 #define N_1M (1024 * 1024)
 
-int mon_mm_dirty(long mm_size, long dirty_rate)
+int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
 {
     unsigned char *mm_ptr, *mm_buf, *mm_end;
     unsigned char cur_val = 1;
     long page_size = getpagesize();
     long pages_per_mb = N_1M / page_size;
     uint64_t time_iter, time_now;
-    unsigned long dirtied_mb = 0;
+    unsigned long dirtied_mb = 0, mm_npages;
     float speed;
     int i;
     int first_round = 1;
@@ -510,6 +538,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
     } else {
         printf("Dirty memory rate: \tMaximum\n");
     }
+    printf("Dirty pattern: %s\n", pattern_str[pattern]);
 
     mm_buf = malloc(mm_size * N_1M);
     if (!mm_buf) {
@@ -518,6 +547,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
     }
     mm_ptr = mm_buf;
     mm_end = mm_buf + mm_size * N_1M;
+    mm_npages = (unsigned long) ((mm_end - mm_ptr) / page_size);
     time_iter = get_msec();
 
     puts("+------------------------+");
@@ -527,18 +557,27 @@ int mon_mm_dirty(long mm_size, long dirty_rate)
     while (1) {
         /* Dirty in MB unit */
         for (i = 0; i < pages_per_mb; i++) {
-            /* Validate memory if not the first round */
-            unsigned char target = cur_val - 1;
+            if (pattern == PATTERN_SEQ) {
+                /* Validate memory if not the first round */
+                unsigned char target = cur_val - 1;
 
-            if (!first_round && *mm_ptr != target) {
-                fprintf(stderr, "%s: detected corrupted memory (%d != %d)!\n",
-                        __func__, *mm_ptr, target);
-                exit(-1);
+                if (!first_round && *mm_ptr != target) {
+                    fprintf(stderr, "%s: detected corrupted memory (%d != %d)!\n",
+                            __func__, *mm_ptr, target);
+                    exit(-1);
+                }
+                *mm_ptr = cur_val;
+                mm_ptr += page_size;
+            } else if (pattern == PATTERN_RAND) {
+                /* Write something to a random page upon the range */
+                unsigned long rand = random() % mm_npages;
+
+                *(mm_ptr + rand * page_size) = cur_val++;
+            } else {
+                assert(0);
             }
-            *mm_ptr = cur_val;
-            mm_ptr += page_size;
         }
-        if (mm_ptr + N_1M > mm_end) {
+        if (pattern == PATTERN_SEQ && mm_ptr + N_1M > mm_end) {
             mm_ptr = mm_buf;
             first_round = 0;
             cur_val++;
@@ -622,13 +661,18 @@ int main(int argc, char *argv[])
                          mon_client_rr_callback);
     } else if (!strcmp(work_mode, "mm_dirty")) {
         long dirty_rate = 0, mm_size = DEF_MM_DIRTY_SIZE;
+        dirty_pattern pattern;
+
         if (argc >= 3) {
             mm_size = atol(argv[2]);
         }
         if (argc >= 4) {
             dirty_rate = atol(argv[3]);
         }
-        ret = mon_mm_dirty(mm_size, dirty_rate);
+        if (argc >= 5) {
+            pattern = parse_dirty_pattern(argv[4]);
+        }
+        ret = mon_mm_dirty(mm_size, dirty_rate, pattern);
     } else {
         usage();
         return -1;
