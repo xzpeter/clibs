@@ -579,8 +579,11 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
         }
         if (pattern == PATTERN_SEQ && mm_ptr + N_1M > mm_end) {
             mm_ptr = mm_buf;
-            first_round = 0;
             cur_val++;
+            if (first_round) {
+                printf("Finished pre-heat of first round\n");
+                first_round = 0;
+            }
         }
         dirtied_mb++;
         if (dirty_rate && dirtied_mb >= dirty_rate) {
