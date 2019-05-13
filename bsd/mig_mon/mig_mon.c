@@ -28,7 +28,7 @@ char *pattern_str[PATTERN_NUM] = { "sequential", "random" };
 #define  BUF_LEN                     (1024)
 #define  MIG_MON_SPIKE_LOG_DEF       ("/tmp/spike.log")
 #define  DEF_MM_DIRTY_SIZE           (512)
-#define  DEF_MM_DIRTY_PATTERN        PATTERN_SEQ
+#define  DEF_MM_DIRTY_PATTERN        PATTERN_RAND
 
 static const char *prog_name = NULL;
 
@@ -557,7 +557,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
     while (1) {
         /* Dirty in MB unit */
         for (i = 0; i < pages_per_mb; i++) {
-            if (pattern == PATTERN_SEQ) {
+            if (first_round || pattern == PATTERN_SEQ) {
                 /* Validate memory if not the first round */
                 unsigned char target = cur_val - 1;
 
@@ -572,16 +572,21 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
                 /* Write something to a random page upon the range */
                 unsigned long rand = random() % mm_npages;
 
-                *(mm_ptr + rand * page_size) = cur_val++;
+                *(mm_buf + rand * page_size) = cur_val++;
             } else {
                 assert(0);
             }
         }
-        if (pattern == PATTERN_SEQ && mm_ptr + N_1M > mm_end) {
+        if ((first_round || pattern == PATTERN_SEQ) &&
+            mm_ptr + N_1M > mm_end) {
             mm_ptr = mm_buf;
             cur_val++;
             if (first_round) {
-                printf("Finished pre-heat of first round\n");
+                printf("Finished pre-heat of first round");
+                if (pattern == PATTERN_RAND) {
+                    printf(", starting to use random access");
+                }
+                puts("");
                 first_round = 0;
             }
         }
@@ -664,7 +669,7 @@ int main(int argc, char *argv[])
                          mon_client_rr_callback);
     } else if (!strcmp(work_mode, "mm_dirty")) {
         long dirty_rate = 0, mm_size = DEF_MM_DIRTY_SIZE;
-        dirty_pattern pattern;
+        dirty_pattern pattern = DEF_MM_DIRTY_PATTERN;
 
         if (argc >= 3) {
             mm_size = atol(argv[2]);
