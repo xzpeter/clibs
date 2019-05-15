@@ -591,7 +591,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
             }
         }
         dirtied_mb++;
-        if (dirty_rate && dirtied_mb >= dirty_rate) {
+        if (!first_round && dirty_rate && dirtied_mb >= dirty_rate) {
             /*
              * We have dirtied enough, wait for a while until we reach
              * the next second.
