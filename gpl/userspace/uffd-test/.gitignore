@@ -1,1 +1,3 @@
 uffd-test
+uffd-hugetlb-share-pmd
+uffd-remap-stall-flag
