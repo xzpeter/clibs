@@ -15,12 +15,7 @@
 #include <time.h>
 #include <poll.h>
 #include <sys/eventfd.h>
-
-/*
- * The kernel version I'm testing is still not yet merged; I need my
- * own header.  When settled, we can include <linux/userfaultfd.h>
- */
-#include "userfaultfd.h"
+#include <linux/userfaultfd.h>
 
 typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
