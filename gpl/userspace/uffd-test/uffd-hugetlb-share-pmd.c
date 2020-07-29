@@ -7,6 +7,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -37,14 +38,16 @@ static int uffd_handle;
 static pthread_t uffd_thread;
 static int uffd_quit = -1;
 static int hugetlb_fd = -1;
+static int enable_share_pmd;
 
 static void uffd_test_usage(const char *name)
 {
     puts("");
-    printf("usage: %s <missing|wp>\n", name);
+    printf("usage: %s <missing|wp> <share-pmd>\n", name);
     puts("");
     puts("  missing:\tdo page miss test");
     puts("  wp:     \tdo page write-protect test");
+    puts("  share-pmd: \twhether to trigger hugetlbfs share pmd");
     puts("");
     exit(0);
 }
@@ -210,6 +213,49 @@ static int uffd_do_register(void)
     return 0;
 }
 
+static void trigger_share_pmd(char *addr)
+{
+    pid_t child;
+    int i;
+
+    child = fork();
+
+    if (child) {
+        waitpid(child, NULL, 0);
+    } else {
+        for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
+            /*
+             * This will prefault the pmds, then the shared pud entry will be
+             * filled in by the child.
+             */
+            *(addr + i * page_size) = 0;
+        }
+        printf("child: finished trigger share pmd\n");
+        exit(0);
+    }
+}
+
+static void trigger_share_pmd_mprotect(char *addr)
+{
+    pid_t child;
+    int i;
+
+    child = fork();
+
+    if (child) {
+        waitpid(child, NULL, 0);
+    } else {
+        /*
+         * NOTE: this will not trigger the bug even with wp-supported
+         * userfaultfd kernels because change_huge_pmd() preserve_write will
+         * still be false
+         */
+        mprotect(addr, page_size * UFFD_BUFFER_PAGES, PROT_READ | PROT_WRITE);
+        printf("child: finished trigger share pmd mprotect()\n");
+        exit(0);
+    }
+}
+
 static void *find_aligned_addr(unsigned long size)
 {
     void *addr;
@@ -267,6 +313,10 @@ static int uffd_test_init(void)
     if ((uint64_t)uffd_buffer & (uffd_buffer_size - 1)) {
         printf("mmap() returned unaligned address\n");
         return -1;
+    }
+
+    if (enable_share_pmd) {
+        trigger_share_pmd(uffd_buffer);
     }
 
     if (uffd_handle_init()) {
@@ -354,6 +404,10 @@ int uffd_test_wp(void)
         return -1;
     }
 
+    if (enable_share_pmd) {
+        trigger_share_pmd_mprotect(uffd_buffer);
+    }
+
     uffd_test_loop();
 
     return 0;
@@ -369,14 +423,15 @@ int uffd_test_missing(void)
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    const char *cmd;
+    const char *cmd, *sharepmd;
 
     srand(time(NULL));
 
-    if (argc < 2) {
+    if (argc < 3) {
         uffd_test_usage(argv[0]);
     }
     cmd = argv[1];
+    sharepmd = argv[2];
 
     if (!strcmp(cmd, "missing")) {
         test_name = TEST_MISSING;
@@ -385,6 +440,8 @@ int main(int argc, char *argv[])
     } else {
         uffd_test_usage(argv[0]);
     }
+
+    enable_share_pmd = atoi(sharepmd);
 
     if (uffd_test_init()) {
         return -1;
