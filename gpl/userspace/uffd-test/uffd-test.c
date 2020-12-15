@@ -34,14 +34,16 @@ static size_t uffd_buffer_size;
 static int uffd_handle;
 static pthread_t uffd_thread;
 static int uffd_quit = -1;
+static int uffd_shmem;
 
 static void uffd_test_usage(const char *name)
 {
     puts("");
-    printf("usage: %s <missing|wp>\n", name);
+    printf("usage: %s <missing|wp> [shmem]\n", name);
     puts("");
     puts("  missing:\tdo page miss test");
     puts("  wp:     \tdo page write-protect test");
+    puts("  shmem:  \tuse shmem");
     puts("");
     exit(0);
 }
@@ -204,6 +206,8 @@ static int uffd_do_register(void)
 
 static int uffd_test_init(void)
 {
+    int flags = MAP_ANONYMOUS;
+
     uffd_quit = eventfd(0, 0);
 
     assert(uffd_buffer == NULL);
@@ -211,8 +215,14 @@ static int uffd_test_init(void)
     page_size = getpagesize();
     uffd_buffer_size = page_size * UFFD_BUFFER_PAGES;
 
+    if (uffd_shmem) {
+        flags |= MAP_SHARED;
+    } else {
+        flags |= MAP_PRIVATE;
+    }
+
     uffd_buffer = mmap(NULL, uffd_buffer_size, PROT_READ | PROT_WRITE,
-                       MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+                       flags, -1, 0);
 
     if (uffd_buffer == MAP_FAILED) {
         printf("map() failed: %s\n", strerror(errno));
@@ -353,10 +363,27 @@ int uffd_test_missing(void)
     return 0;
 }
 
+int uffd_type_parse(const char *type)
+{
+    if (!type) {
+        return 0;
+    }
+
+    if (!strcmp(type, "shmem")) {
+        uffd_shmem = 1;
+        printf("Using shmem\n");
+    } else {
+        printf("Unknown type: %s\n", type);
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    const char *cmd;
+    const char *cmd, *type = NULL;
 
     srand(time(NULL));
 
@@ -365,12 +392,20 @@ int main(int argc, char *argv[])
     }
     cmd = argv[1];
 
+    if (argc > 2) {
+        type = argv[2];
+    }
+
     if (!strcmp(cmd, "missing")) {
         test_name = TEST_MISSING;
     } else if (!strcmp(cmd, "wp")) {
         test_name = TEST_WP;
     } else {
         uffd_test_usage(argv[0]);
+    }
+
+    if (uffd_type_parse(type)) {
+        return -1;
     }
 
     if (uffd_test_init()) {
