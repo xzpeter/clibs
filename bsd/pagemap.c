@@ -12,7 +12,7 @@
 #define PM_SWAP                       BIT_ULL(62)
 #define PM_PRESENT                    BIT_ULL(63)
 
-#define PAGE_NUM 32*(1UL<<10) /* 32K pages -> 64MB bytes */
+#define PAGE_NUM 256*(1UL<<10) /* 256K pages -> 1GB bytes */
 #define PERF_RUNS 5
 
 static int pagemap_fd;
