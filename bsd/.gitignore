@@ -1,1 +1,5 @@
 clocks
+cmpxchg
+deadlock
+pagemap
+rmap_fork
