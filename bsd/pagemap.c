@@ -47,9 +47,14 @@ static uint64_t pagemap_read_vaddr(void *vaddr)
 static void dump(void *addr, const char *msg)
 {
     uint64_t val = pagemap_read_vaddr(addr);
+    unsigned char core;
+    int ret;
 
-    printf("%30s: present bit %d, swap bit %d\n", msg,
-           !!(val & PM_PRESENT), !!(val & PM_SWAP));
+    ret = mincore(addr, psize, &core);
+    assert(ret == 0);
+
+    printf("%30s: present bit %d, swap bit %d, mincore()==%d\n", msg,
+           !!(val & PM_PRESENT), !!(val & PM_SWAP), core);
 }
 
 static void test_func(char *addr)
