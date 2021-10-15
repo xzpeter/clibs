@@ -19,6 +19,8 @@ typedef enum {
     PATTERN_NUM,
 } dirty_pattern;
 
+#define  VERSION  "v0.1"
+
 char *pattern_str[PATTERN_NUM] = { "sequential", "random" };
 
 /* whether allow client change its IP */
@@ -85,6 +87,7 @@ void usage(void)
     printf("       \t          \t(default: \"%s\")\n",
            pattern_str[DEF_MM_DIRTY_PATTERN]);
     puts("");
+    printf("Version: %s\n\n", VERSION);
 }
 
 dirty_pattern parse_dirty_pattern(const char *str)
