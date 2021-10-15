@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdint.h>
@@ -543,9 +544,10 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
     }
     printf("Dirty pattern: \t%s\n", pattern_str[pattern]);
 
-    mm_buf = malloc(mm_size * N_1M);
-    if (!mm_buf) {
-        fprintf(stderr, "%s: malloc failed\n", __func__);
+    mm_buf = mmap(NULL, mm_size * N_1M, PROT_READ | PROT_WRITE,
+                  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (mm_buf == MAP_FAILED) {
+        fprintf(stderr, "%s: mmap() failed\n", __func__);
         return -1;
     }
     mm_ptr = mm_buf;
