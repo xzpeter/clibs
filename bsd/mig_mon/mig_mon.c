@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <time.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -130,7 +131,7 @@ void write_spike_log(int fd, uint64_t delay)
     char spike_buf[1024] = {0};
     int str_len = -1;
     str_len = snprintf(spike_buf, sizeof(spike_buf) - 1,
-                       "%ld,%ld\n", get_timestamp(), delay);
+                       "%"PRIu64",%"PRIu64"\n", get_timestamp(), delay);
     spike_buf[sizeof(spike_buf) - 1] = 0x00;
     write(fd, spike_buf, str_len);
     /* not flushed to make it fast */
@@ -201,9 +202,9 @@ enum event_state handle_event(int spike_fd)
          */
         assert(first_latency == 0);
         first_latency = delay;
-        printf("1st and 2nd packet latency: %lu (ms)\n", first_latency);
+        printf("1st and 2nd packet latency: %"PRIu64" (ms)\n", first_latency);
         spike_throttle = delay * 2;
-        printf("Setting spike throttle to: %lu (ms)\n", spike_throttle);
+        printf("Setting spike throttle to: %"PRIu64" (ms)\n", spike_throttle);
         if (spike_fd != -1) {
             printf("Updating spike log initial timestamp\n");
             /* this -1 is meaningless, shows the init timestamp only. */
@@ -224,7 +225,7 @@ enum event_state handle_event(int spike_fd)
             write_spike_log(spike_fd, delay);
         }
         printf("\r                                                       ");
-        printf("\r[%lu] max_delay: %lu (ms), cur: %lu (ms)", cur,
+        printf("\r[%"PRIu64"] max_delay: %"PRIu64" (ms), cur: %"PRIu64" (ms)", cur,
                max_delay, delay);
         fflush(stdout);
         break;
@@ -332,7 +333,7 @@ int mon_server_rr_callback(int sock, int spike_fd)
     cur = get_msec();
 
     printf("\r                                                  ");
-    printf("\r[%lu] responding to client", cur);
+    printf("\r[%"PRIu64"] responding to client", cur);
     fflush(stdout);
 
     return 0;
@@ -405,7 +406,7 @@ int mon_client_callback(int sock, int spike_fd, int interval_ms)
     }
     cur = get_msec();
     printf("\r                                                  ");
-    printf("\r[%lu] sending packet to server", cur);
+    printf("\r[%"PRIu64"] sending packet to server", cur);
     fflush(stdout);
     usleep(int_us);
 
@@ -610,7 +611,7 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
         time_now = get_msec();
         if (time_now - time_iter >= 1000) {
             speed = 1.0 * dirtied_mb / (time_now - time_iter) * 1000;
-            printf("Dirty rate: %.0f (MB/s), duration: %ld (ms)\n",
+            printf("Dirty rate: %.0f (MB/s), duration: %"PRIu64" (ms)\n",
                    speed, time_now - time_iter);
             time_iter = time_now;
             dirtied_mb = 0;
