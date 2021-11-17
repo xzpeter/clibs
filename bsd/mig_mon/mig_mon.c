@@ -542,7 +542,7 @@ static void prefault_range(unsigned char *buf, unsigned long pages)
     unsigned long index = 0;
 
     while (index < pages) {
-        *buf = 0;
+        *(buf) = 1;
         buf = (unsigned char *)((unsigned long)buf + page_size);
 
         /* Each 1GB for 4K page size, print a dot */
@@ -596,7 +596,11 @@ static void prefault_memory(unsigned char *buf, unsigned long pages)
 int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
 {
     unsigned char *mm_ptr, *mm_buf, *mm_end;
-    unsigned char cur_val = 1;
+    /*
+     * Prefault with 1, to skip migration zero detection, so the next value to
+     * set is 2.
+     */
+    unsigned char cur_val = 2;
     long pages_per_mb = N_1M / page_size;
     uint64_t time_iter, time_now;
     unsigned long dirtied_mb = 0, mm_npages;
