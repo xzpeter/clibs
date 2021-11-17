@@ -19,12 +19,13 @@
 typedef enum {
     PATTERN_SEQ = 0,
     PATTERN_RAND = 1,
+    PATTERN_ONCE = 2,
     PATTERN_NUM,
 } dirty_pattern;
 
 #define  VERSION  "v0.1.1"
 
-char *pattern_str[PATTERN_NUM] = { "sequential", "random" };
+char *pattern_str[PATTERN_NUM] = { "sequential", "random", "once" };
 
 /* whether allow client change its IP */
 #define  MIG_MON_SINGLE_CLIENT       (0)
@@ -33,7 +34,7 @@ char *pattern_str[PATTERN_NUM] = { "sequential", "random" };
 #define  BUF_LEN                     (1024)
 #define  MIG_MON_SPIKE_LOG_DEF       ("/tmp/spike.log")
 #define  DEF_MM_DIRTY_SIZE           (512)
-#define  DEF_MM_DIRTY_PATTERN        PATTERN_RAND
+#define  DEF_MM_DIRTY_PATTERN        PATTERN_SEQ
 
 static const char *prog_name = NULL;
 static long n_cpus;
@@ -88,9 +89,13 @@ void usage(void)
            prog_name);
     printf("       \t mm_size: \tin MB (default: %d)\n", DEF_MM_DIRTY_SIZE);
     printf("       \t dirty_rate: \tin MB/s (default: unlimited)\n");
-    printf("       \t pattern: \t\"sequential\" or \"random\"\n");
+    printf("       \t pattern: \t\"sequential\", \"random\", or \"once\"\n");
     printf("       \t          \t(default: \"%s\")\n",
            pattern_str[DEF_MM_DIRTY_PATTERN]);
+    puts("");
+    printf("       \t          \tsequential - dirty memory sequentially\n");
+    printf("       \t          \trandom - dirty memory randomly\n");
+    printf("       \t          \tonce - dirty memory once then keep idle\n");
     puts("");
     printf("Version: %s\n\n", VERSION);
 }
@@ -622,6 +627,13 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
     puts("|   Prefault Memory      |");
     puts("+------------------------+");
     prefault_memory(mm_buf, mm_npages);
+
+    if (pattern == PATTERN_ONCE) {
+        puts("[Goes to sleep; please hit ctrl-c to stop this program]");
+        while (1) {
+            sleep(1000);
+        }
+    }
 
     puts("+------------------------+");
     puts("|   Start Dirty Memory   |");
