@@ -14,6 +14,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <pthread.h>
 
 typedef enum {
     PATTERN_SEQ = 0,
@@ -35,6 +36,8 @@ char *pattern_str[PATTERN_NUM] = { "sequential", "random" };
 #define  DEF_MM_DIRTY_PATTERN        PATTERN_RAND
 
 static const char *prog_name = NULL;
+static long n_cpus;
+static long page_size;
 
 void usage(void)
 {
@@ -524,17 +527,76 @@ close_sock:
 
 #define N_1M (1024 * 1024)
 
+struct thread_info {
+    unsigned char *buf;
+    unsigned long pages;
+};
+
+static void prefault_range(unsigned char *buf, unsigned long pages)
+{
+    unsigned long index = 0;
+
+    while (index < pages) {
+        *buf = 0;
+        buf = (unsigned char *)((unsigned long)buf + page_size);
+
+        /* Each 1GB for 4K page size, print a dot */
+        if (++index % (256 * 1024) == 0) {
+            printf(".");
+            fflush(stdout);
+        }
+    }
+}
+
+static void * prefault_thread(void *data)
+{
+    struct thread_info *info = data;
+
+    prefault_range(info->buf, info->pages);
+
+    return NULL;
+}
+
+static void prefault_memory(unsigned char *buf, unsigned long pages)
+{
+    unsigned long each = pages / n_cpus;
+    unsigned long left = pages % n_cpus;
+    pthread_t *threads = calloc(n_cpus, sizeof(pthread_t));
+    struct thread_info *infos = calloc(n_cpus, sizeof(struct thread_info));
+    int i, ret;
+
+    assert(threads);
+
+    for (i = 0; i < n_cpus; i++) {
+        struct thread_info *info = infos + i;
+        pthread_t *thread = threads + i;
+
+        info->buf = buf + each * page_size * i;
+        info->pages = each;
+        ret = pthread_create(thread, NULL, prefault_thread, info);
+        assert(ret == 0);
+    }
+
+    if (left) {
+        prefault_range(buf + each * n_cpus, left);
+    }
+
+    for (i = 0; i < n_cpus; i++) {
+        ret = pthread_join(threads[i], NULL);
+        assert(ret == 0);
+    }
+    printf("done\n");
+}
+
 int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
 {
     unsigned char *mm_ptr, *mm_buf, *mm_end;
     unsigned char cur_val = 1;
-    long page_size = getpagesize();
     long pages_per_mb = N_1M / page_size;
     uint64_t time_iter, time_now;
     unsigned long dirtied_mb = 0, mm_npages;
     float speed;
     int i;
-    int first_round = 1;
 
     printf("Test memory size: \t%ld (MB)\n", mm_size);
     printf("Page size: \t\t%ld (Bytes)\n", page_size);
@@ -557,17 +619,22 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
     time_iter = get_msec();
 
     puts("+------------------------+");
+    puts("|   Prefault Memory      |");
+    puts("+------------------------+");
+    prefault_memory(mm_buf, mm_npages);
+
+    puts("+------------------------+");
     puts("|   Start Dirty Memory   |");
     puts("+------------------------+");
 
     while (1) {
         /* Dirty in MB unit */
         for (i = 0; i < pages_per_mb; i++) {
-            if (first_round || pattern == PATTERN_SEQ) {
+            if (pattern == PATTERN_SEQ) {
                 /* Validate memory if not the first round */
                 unsigned char target = cur_val - 1;
 
-                if (!first_round && *mm_ptr != target) {
+                if (*mm_ptr != target) {
                     fprintf(stderr, "%s: detected corrupted memory (%d != %d)!\n",
                             __func__, *mm_ptr, target);
                     exit(-1);
@@ -583,21 +650,12 @@ int mon_mm_dirty(long mm_size, long dirty_rate, dirty_pattern pattern)
                 assert(0);
             }
         }
-        if ((first_round || pattern == PATTERN_SEQ) &&
-            mm_ptr + N_1M > mm_end) {
+        if (pattern == PATTERN_SEQ && mm_ptr + N_1M > mm_end) {
             mm_ptr = mm_buf;
             cur_val++;
-            if (first_round) {
-                printf("Finished pre-heat of first round");
-                if (pattern == PATTERN_RAND) {
-                    printf(", starting to use random access");
-                }
-                puts("");
-                first_round = 0;
-            }
         }
         dirtied_mb++;
-        if (!first_round && dirty_rate && dirtied_mb >= dirty_rate) {
+        if (dirty_rate && dirtied_mb >= dirty_rate) {
             /*
              * We have dirtied enough, wait for a while until we reach
              * the next second.
@@ -629,6 +687,9 @@ int main(int argc, char *argv[])
     const char *work_mode = NULL;
     const char *server_ip = NULL;
     const char *spike_log = MIG_MON_SPIKE_LOG_DEF;
+
+    n_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    page_size = getpagesize();
 
     prog_name = argv[0];
 

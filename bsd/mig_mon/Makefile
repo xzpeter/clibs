@@ -1,4 +1,5 @@
-CFLAGS=-g -O0 -Wall -Werror
+CFLAGS=-O3 -Wall -Werror
+LDFALGS=-lpthread
 
 .PHONY: clean
 
