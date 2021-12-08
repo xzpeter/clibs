@@ -704,6 +704,11 @@ int main(int argc, char *argv[])
     const char *server_ip = NULL;
     const char *spike_log = MIG_MON_SPIKE_LOG_DEF;
 
+    puts("");
+    printf("THIS REPO IS OBSOLETE. PLEASE FIND THE LATEST VERSION AT:\n");
+    printf("https://github.com/xzpeter/mig_mon\n");
+    puts("");
+
     n_cpus = sysconf(_SC_NPROCESSORS_ONLN);
     page_size = getpagesize();
 
