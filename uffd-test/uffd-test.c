@@ -20,7 +20,7 @@
 
 typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
-#define UFFD_BUFFER_PAGES  (8)
+#define UFFD_BUFFER_PAGES  (32)
 
 enum {
     TEST_MISSING = 0,
