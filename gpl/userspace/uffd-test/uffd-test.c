@@ -170,8 +170,8 @@ static void *uffd_bounce_thread(void *data)
             }
 
             if (ioctl(uffd, UFFDIO_COPY, &copy)) {
-                printf("%s: copy page failed for address 0x%llx\n",
-                       __func__, addr);
+                printf("%s: copy page failed for address 0x%llx: %d (%s)\n",
+                       __func__, addr, copy.copy, strerror(copy.copy));
                 continue;
             }
 
