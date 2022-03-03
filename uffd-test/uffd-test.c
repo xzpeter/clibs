@@ -35,7 +35,7 @@ enum {
     MEM_TYPE_MAX,
 } mem_type;
 
-static size_t page_size;
+static unsigned long page_size;
 
 static void *uffd_buffer;
 static void *zero_page;
@@ -151,8 +151,9 @@ static void *uffd_bounce_thread(void *data)
             wp.mode = 0;
 
             if (ioctl(uffd, UFFDIO_WRITEPROTECT, &wp)) {
-                printf("%s: Unset WP failed for address 0x%llx\n",
-                       __func__, addr);
+                ret = errno;
+                printf("%s: Unset WP failed for address 0x%llx: %d (%s)\n",
+                       __func__, addr, -ret, strerror(ret));
                 continue;
             }
 
@@ -170,8 +171,9 @@ static void *uffd_bounce_thread(void *data)
             }
 
             if (ioctl(uffd, UFFDIO_COPY, &copy)) {
+                ret = errno;
                 printf("%s: copy page failed for address 0x%llx: %d (%s)\n",
-                       __func__, addr, copy.copy, strerror(copy.copy));
+                       __func__, addr, -ret, strerror(ret));
                 continue;
             }
 
@@ -230,13 +232,12 @@ static int uffd_test_init(void)
 
     assert(uffd_buffer == NULL);
 
-    /* Can be over-written later */
-    page_size = getpagesize();
-
     if (mem_type == MEM_SHMEM) {
         flags |= MAP_SHARED;
+        page_size = getpagesize();
     } else if (mem_type == MEM_ANON) {
         flags |= MAP_PRIVATE;
+        page_size = getpagesize();
     } else if (mem_type == MEM_HUGETLB) {
         flags |= MAP_HUGETLB | MAP_HUGE_2MB | MAP_PRIVATE;
         page_size = 2UL << 20;
@@ -275,6 +276,7 @@ static int uffd_test_init(void)
         return -1;
     }
 
+    printf("page size: %lu\n", page_size);
     printf("uffd buffer pages: %u\n", UFFD_BUFFER_PAGES);
     printf("uffd buffer size: %zu\n", uffd_buffer_size);
     printf("uffd buffer address: %p\n", uffd_buffer);
