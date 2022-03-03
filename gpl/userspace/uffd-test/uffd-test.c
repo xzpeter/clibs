@@ -6,6 +6,7 @@
 #include <sys/syscall.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <linux/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -21,13 +22,20 @@ typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
 #define UFFD_BUFFER_PAGES  (8)
 
-enum test_name {
+enum {
     TEST_MISSING = 0,
     TEST_WP,
-};
+} test_name;
+
+enum {
+    MEM_ANON = 0,
+    MEM_SHMEM,
+    MEM_HUGETLB,
+    MEM_HUGETLB_SHARED,
+    MEM_TYPE_MAX,
+} mem_type;
 
 static size_t page_size;
-static enum test_name test_name;
 
 static void *uffd_buffer;
 static void *zero_page;
@@ -40,11 +48,12 @@ static int uffd_shmem;
 static void uffd_test_usage(const char *name)
 {
     puts("");
-    printf("usage: %s <missing|wp> [shmem]\n", name);
+    printf("usage: %s <missing|wp> [anon|shmem|hugetlb|hugetlb_shared]\n", name);
     puts("");
     puts("  missing:\tdo page miss test");
     puts("  wp:     \tdo page write-protect test");
-    puts("  shmem:  \tuse shmem");
+    puts("");
+    puts("The memory type parameter is optional. By default, 'anon' is used.");
     puts("");
     exit(0);
 }
@@ -221,18 +230,27 @@ static int uffd_test_init(void)
 
     assert(uffd_buffer == NULL);
 
+    /* Can be over-written later */
     page_size = getpagesize();
+
+    if (mem_type == MEM_SHMEM) {
+        flags |= MAP_SHARED;
+    } else if (mem_type == MEM_ANON) {
+        flags |= MAP_PRIVATE;
+    } else if (mem_type == MEM_HUGETLB) {
+        flags |= MAP_HUGETLB | MAP_HUGE_2MB | MAP_PRIVATE;
+        page_size = 2UL << 20;
+    } else {
+        assert(mem_type == MEM_HUGETLB_SHARED);
+        flags |= MAP_HUGETLB | MAP_HUGE_2MB | MAP_SHARED;
+        page_size = 2UL << 20;
+    }
     uffd_buffer_size = page_size * UFFD_BUFFER_PAGES;
 
     /* Init zero page */
     zero_page = mmap(NULL, page_size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-    if (uffd_shmem) {
-        flags |= MAP_SHARED;
-    } else {
-        flags |= MAP_PRIVATE;
-    }
 
     uffd_buffer = mmap(NULL, uffd_buffer_size, PROT_READ | PROT_WRITE,
                        flags, -1, 0);
@@ -417,8 +435,13 @@ int uffd_type_parse(const char *type)
     }
 
     if (!strcmp(type, "shmem")) {
-        uffd_shmem = 1;
-        printf("Using shmem\n");
+        mem_type = MEM_SHMEM;
+    } else if (!strcmp(type, "hugetlb")) {
+        mem_type = MEM_HUGETLB;
+    } else if (!strcmp(type, "hugetlb_shared")) {
+        mem_type = MEM_HUGETLB_SHARED;
+    } else if (!strcmp(type, "anon")) {
+        mem_type = MEM_ANON;
     } else {
         printf("Unknown type: %s\n", type);
         return -1;
