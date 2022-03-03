@@ -142,6 +142,13 @@ static void *uffd_bounce_thread(void *data)
         addr = msg.arg.pagefault.address;
         index = (addr - (uint64_t)uffd_buffer) / page_size;
 
+        if (addr < (uint64_t) uffd_buffer ||
+            addr >= (uint64_t) uffd_buffer + uffd_buffer_size) {
+            printf("Illegal page fault address detected (0x%lx). "
+                   "Possibly a kernel bug!\n", addr);
+            exit(-1);
+        }
+
         if (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP) {
             struct uffdio_writeprotect wp = { 0 };
 
