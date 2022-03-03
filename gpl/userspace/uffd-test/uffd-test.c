@@ -19,7 +19,7 @@
 
 typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
-#define UFFD_BUFFER_PAGES  (1024)
+#define UFFD_BUFFER_PAGES  (8)
 
 enum test_name {
     TEST_MISSING = 0,
@@ -97,6 +97,7 @@ static void *uffd_bounce_thread(void *data)
 
     while (1) {
         struct uffd_msg msg;
+        uint64_t addr, index;
         ssize_t len;
         int ret;
 
@@ -128,43 +129,39 @@ static void *uffd_bounce_thread(void *data)
             continue;
         }
 
-        if (test_name == TEST_WP) {
+        addr = msg.arg.pagefault.address;
+        index = (addr - (uint64_t)uffd_buffer) / page_size;
+
+        if (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP) {
             struct uffdio_writeprotect wp = { 0 };
 
-            if (!(msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP)) {
-                printf("%s: WP flag not detected in PF flags"
-                       "for address 0x%llx\n", __func__,
-                       msg.arg.pagefault.address);
-                continue;
-            }
-
-            wp.range.start = msg.arg.pagefault.address;
+            wp.range.start = addr;
             wp.range.len = page_size;
             /* Undo write-protect, do wakeup after that */
             wp.mode = 0;
 
             if (ioctl(uffd, UFFDIO_WRITEPROTECT, &wp)) {
                 printf("%s: Unset WP failed for address 0x%llx\n",
-                       __func__, msg.arg.pagefault.address);
+                       __func__, addr);
                 continue;
             }
 
-            printf("%s: Detected WP for page 0x%llx, recovered\n",
-                   __func__, msg.arg.pagefault.address);
-        } else if (test_name == TEST_MISSING) {
+            printf("%s: Detected WP for page %d (0x%llx), recovered\n",
+                   __func__, index, addr);
+        } else {
             struct uffdio_zeropage zero = { 0 };
 
-            zero.range.start = msg.arg.pagefault.address;
+            zero.range.start = addr;
             zero.range.len = page_size;
 
             if (ioctl(uffd, UFFDIO_ZEROPAGE, &zero)) {
                 printf("%s: zero page failed for address 0x%llx\n",
-                       __func__, msg.arg.pagefault.address);
+                       __func__, addr);
                 continue;
             }
 
-            printf("%s: Detected missing page 0x%llx, recovered\n",
-                   __func__, msg.arg.pagefault.address);
+            printf("%s: Detected missing page %d (0x%llx), recovered\n",
+                   __func__, index, addr);
         }
 
         served_pages++;
@@ -184,7 +181,7 @@ static int uffd_do_register(void)
     reg.range.len = (uint64_t) uffd_buffer_size;
 
     if (test_name == TEST_WP) {
-        reg.mode = UFFDIO_REGISTER_MODE_WP;
+        reg.mode = UFFDIO_REGISTER_MODE_MISSING | UFFDIO_REGISTER_MODE_WP;
     } else if (test_name == TEST_MISSING) {
         reg.mode = UFFDIO_REGISTER_MODE_MISSING;
     }
@@ -238,10 +235,6 @@ static int uffd_test_init(void)
         return -1;
     }
 
-    if (uffd_do_register()) {
-        return -1;
-    }
-
     if (pthread_create(&uffd_thread, NULL,
                        uffd_bounce_thread, (void *)(uint64_t)uffd_handle)) {
         printf("pthread_create() failed: %s\n", strerror(errno));
@@ -266,11 +259,18 @@ char *wp_prefault_str[WP_PREFAULT_MAX] = {
     "no-prefault", "read-prefault", "write-prefault"
 };
 
+unsigned char page_info[UFFD_BUFFER_PAGES][2];
+
 int uffd_do_write_protect(void)
 {
     struct uffdio_writeprotect wp;
+    char buf, *ptr, x;
     int i;
-    char buf, *ptr;
+
+    for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
+        page_info[i][0] = random() % WP_PREFAULT_MAX;
+        page_info[i][1] = random() % 2;
+    }
 
     /*
      * Pre-fault the region randomly.  For each page, we choose one of
@@ -283,8 +283,7 @@ int uffd_do_write_protect(void)
      *     in a real page PFN into PTE
      */
     for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
-        int x = random() % 3;
-        printf("prefaulting the page %d by %s\n", i, wp_prefault_str[x]);
+        x = page_info[i][0];
         ptr = uffd_buffer + i * page_size;
         switch (x) {
         case WP_PREFAULT_READ:
@@ -299,16 +298,41 @@ int uffd_do_write_protect(void)
         }
     }
 
-    wp.range.start = (uint64_t) uffd_buffer;
-    wp.range.len = (uint64_t) uffd_buffer_size;
-    wp.mode = UFFDIO_WRITEPROTECT_MODE_WP;
-
-    if (ioctl(uffd_handle, UFFDIO_WRITEPROTECT, &wp)) {
-        printf("%s: Failed to do write protect\n", __func__);
+    /* Register the region */
+    if (uffd_do_register()) {
         return -1;
     }
 
-    printf("uffd marking write protect completed\n");
+    /* Randomly wr-protect some page */
+    for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
+        ptr = uffd_buffer + i * page_size;
+        if (page_info[i][1]) {
+            wp.range.start = (uint64_t) ptr;
+            wp.range.len = (uint64_t) page_size;
+            wp.mode = UFFDIO_WRITEPROTECT_MODE_WP;
+
+            if (ioctl(uffd_handle, UFFDIO_WRITEPROTECT, &wp)) {
+                printf("%s: Failed to do write protect\n", __func__);
+                return -1;
+            }
+        }
+    }
+
+    printf("======================\n");
+
+    for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
+        x = page_info[i][0];
+        printf("Page %d %s", i, wp_prefault_str[x]);
+        if (page_info[i][1]) {
+            printf(", wr-protected");
+        }
+        printf("\n");
+    }
+
+    printf("======================\n");
+
+    /* Make sure the poll thread prints after this */
+    fflush(stdout);
 
     return 0;
 }
@@ -358,6 +382,10 @@ int uffd_test_wp(void)
 
 int uffd_test_missing(void)
 {
+    if (uffd_do_register()) {
+        return -1;
+    }
+
     uffd_test_loop();
 
     return 0;
