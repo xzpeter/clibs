@@ -30,6 +30,7 @@ static size_t page_size;
 static enum test_name test_name;
 
 static void *uffd_buffer;
+static void *zero_page;
 static size_t uffd_buffer_size;
 static int uffd_handle;
 static pthread_t uffd_thread;
@@ -149,20 +150,31 @@ static void *uffd_bounce_thread(void *data)
             printf("%s: Detected WP for page %d (0x%llx), recovered\n",
                    __func__, index, addr);
         } else {
-            struct uffdio_zeropage zero = { 0 };
+            struct uffdio_copy copy = { 0 };
 
-            zero.range.start = addr;
-            zero.range.len = page_size;
+            copy.dst = addr;
+            copy.src = (__u64) zero_page;
+            copy.len = page_size;
 
-            if (ioctl(uffd, UFFDIO_ZEROPAGE, &zero)) {
-                printf("%s: zero page failed for address 0x%llx\n",
+            if (test_name == TEST_WP) {
+                copy.mode = UFFDIO_COPY_MODE_WP;
+            }
+
+            if (ioctl(uffd, UFFDIO_COPY, &copy)) {
+                printf("%s: copy page failed for address 0x%llx\n",
                        __func__, addr);
                 continue;
             }
 
-            printf("%s: Detected missing page %d (0x%llx), recovered\n",
+            printf("%s: Detected missing page %d (0x%llx), recovered",
                    __func__, index, addr);
+            if (test_name == TEST_WP) {
+                printf(", wr-protected");
+            }
+            printf("\n");
         }
+
+        fflush(stdout);
 
         served_pages++;
     }
@@ -211,6 +223,10 @@ static int uffd_test_init(void)
 
     page_size = getpagesize();
     uffd_buffer_size = page_size * UFFD_BUFFER_PAGES;
+
+    /* Init zero page */
+    zero_page = mmap(NULL, page_size, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (uffd_shmem) {
         flags |= MAP_SHARED;
@@ -352,6 +368,9 @@ void uffd_test_stop(void)
 
     munmap(uffd_buffer, uffd_buffer_size);
     uffd_buffer = NULL;
+
+    munmap(zero_page, page_size);
+    zero_page = NULL;
 
     close(uffd_quit);
     uffd_quit = -1;
