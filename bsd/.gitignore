@@ -1,8 +1,0 @@
-clocks
-cmpxchg
-deadlock
-pagemap
-rmap_fork
-bitmap_*
-bitmap
-push.sh
