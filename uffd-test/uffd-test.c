@@ -17,10 +17,25 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <linux/userfaultfd.h>
+#include <inttypes.h>
 
 typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
 #define UFFD_BUFFER_PAGES  (32)
+
+#define _err(fmt, ...)                                  \
+    do {                                                \
+        int ret = errno;                                \
+        fprintf(stderr, "ERROR: " fmt, ##__VA_ARGS__);	\
+        fprintf(stderr, " (errno=%d, line=%d)\n",       \
+                ret, __LINE__);                         \
+	} while (0)
+
+#define err(fmt, ...)                           \
+	do {                                        \
+		_err(fmt, ##__VA_ARGS__);               \
+		exit(1);                                \
+	} while (0)
 
 enum {
     TEST_MISSING = 0,
@@ -35,6 +50,19 @@ enum {
     MEM_TYPE_MAX,
 } mem_type;
 
+typedef enum {
+    STATUS_MISSING_WAITING = 0,
+    STATUS_MISSING_HANDLED,
+    STATUS_WP_WAITING,
+    STATUS_WP_HANDLED,
+    STATUS_NO_FAULT,
+} uffd_status;
+
+struct {
+    uint64_t target_addr;
+    uffd_status status;
+} uffd_test_ctx;
+
 static unsigned long page_size;
 
 static void *uffd_buffer;
@@ -44,6 +72,13 @@ static int uffd_handle;
 static pthread_t uffd_thread;
 static int uffd_quit = -1;
 static int uffd_shmem;
+
+const char *status[] = {
+    "miss-wait",
+    "miss-handled",
+    "wp-wait",
+    "wp-handled",
+};
 
 static void uffd_test_usage(const char *name)
 {
@@ -56,6 +91,37 @@ static void uffd_test_usage(const char *name)
     puts("The memory type parameter is optional. By default, 'anon' is used.");
     puts("");
     exit(0);
+}
+
+static inline void event_set(uint64_t addr, uffd_status status)
+{
+    uffd_test_ctx.target_addr = addr;
+    uffd_test_ctx.status = status;
+}
+
+static inline void event_check(uint64_t addr, uffd_status cur)
+{
+    if (uffd_test_ctx.target_addr != addr) {
+        err("%s: Unexpected fault address (0x%"PRIx64", not 0x%"PRIx64")\n",
+            __func__, addr, uffd_test_ctx.target_addr);
+    }
+
+    if (uffd_test_ctx.status != cur) {
+        err("%s: Unexpected uffd status (%s, rather than %s)\n",
+            __func__, status[cur], status[uffd_test_ctx.status]);
+    }
+
+    printf("Event check successful on addr 0x%"PRIx64" status %s\n",
+           addr, status[cur]);
+}
+
+static inline void event_check_update(uint64_t addr, uffd_status cur,
+                                      uffd_status next)
+{
+    event_check(addr, cur);
+
+    /* Update status to next */
+    uffd_test_ctx.status = next;
 }
 
 static int uffd_handle_init(void)
@@ -152,6 +218,8 @@ static void *uffd_bounce_thread(void *data)
         if (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP) {
             struct uffdio_writeprotect wp = { 0 };
 
+            event_check_update(addr, STATUS_WP_WAITING, STATUS_WP_HANDLED);
+
             wp.range.start = addr;
             wp.range.len = page_size;
             /* Undo write-protect, do wakeup after that */
@@ -175,6 +243,13 @@ static void *uffd_bounce_thread(void *data)
 
             if (test_name == TEST_WP) {
                 copy.mode = UFFDIO_COPY_MODE_WP;
+                /* We should wait for another WP event */
+                event_check_update(addr, STATUS_MISSING_WAITING,
+                                   STATUS_WP_WAITING);
+            } else {
+                /* We simply set the event handled */
+                event_check_update(addr, STATUS_MISSING_WAITING,
+                                   STATUS_MISSING_HANDLED);
             }
 
             if (ioctl(uffd, UFFDIO_COPY, &copy)) {
@@ -302,7 +377,26 @@ char *wp_prefault_str[WP_PREFAULT_MAX] = {
     "no-prefault", "read-prefault", "write-prefault"
 };
 
+/*
+ * For each page:
+ * [0]: prefault type (<= WP_PREFAULT_MAX)
+ * [1]: whether to wr-protect (0/1)
+ */
 unsigned char page_info[UFFD_BUFFER_PAGES][2];
+
+/*
+ * Setup the expected status for all the possible cases.  Note that when
+ * filling in with STATUS_NO_FAULT it means we should never have any
+ * further event triggered on this page.
+ */
+uffd_status wp_expected[WP_PREFAULT_MAX][2] = {
+    /* prefault-none */
+    { STATUS_MISSING_WAITING, STATUS_MISSING_WAITING },
+    /* prefault-read */
+    { STATUS_NO_FAULT, STATUS_WP_WAITING },
+    /* prefault-write */
+    { STATUS_NO_FAULT, STATUS_WP_WAITING },
+};
 
 int uffd_do_write_protect(void)
 {
@@ -407,11 +501,40 @@ void uffd_test_loop(void)
 {
     int i;
     unsigned int *ptr;
+    uffd_status expected;
 
     for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
         printf("writting to page %d\n", i);
         ptr = uffd_buffer + i * page_size;
+
+        /* Setup what we expect to trigger */
+        if (test_name == TEST_MISSING) {
+            /* We always expect a MISSING event to trigger */
+            expected = STATUS_MISSING_WAITING;
+        } else {
+            /* Slightly complicated for uffd-wp test, see the table */
+            expected = wp_expected[page_info[i][0]][page_info[i][1]];
+        }
+        event_set((uint64_t)ptr, expected);
+
         *ptr = i;
+
+        /* Let's also check what has happened.. */
+        if (test_name == TEST_MISSING) {
+            event_check((uint64_t)ptr, STATUS_MISSING_HANDLED);
+        } else {
+            /*
+             * As long as it's not STATUS_NO_FAULT to be expected, we
+             * expect the last status to be WP handled, because even if
+             * UFFDIO_COPY with WP=1 it'll go into that stage at last.
+             */
+            if (expected != STATUS_NO_FAULT) {
+                event_check((uint64_t)ptr, STATUS_WP_HANDLED);
+            } else {
+                /* If no page fault expected, it should keep as-is */
+                event_check((uint64_t)ptr, STATUS_NO_FAULT);
+            }
+        }
     }
 }
 
