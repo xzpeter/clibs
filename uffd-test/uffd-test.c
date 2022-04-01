@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -538,11 +539,26 @@ void uffd_test_loop(void)
     }
 }
 
+void pageout_half(void)
+{
+    uint64_t half_size = page_size * UFFD_BUFFER_PAGES / 2;
+
+    madvise((void *)((uint64_t)uffd_buffer + half_size),
+            half_size, MADV_PAGEOUT);
+}
+
 int uffd_test_wp(void)
 {
     if (uffd_do_write_protect()) {
         return -1;
     }
+
+    /*
+     * Swap out the latter half of the buffer, to test swap entries.  This
+     * is only needed for uffd-wp and missing mode does not need this.
+     * It's an noop for hugetlbfs.
+     */
+    pageout_half();
 
     uffd_test_loop();
 
