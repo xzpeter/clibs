@@ -79,6 +79,7 @@ const char *status[] = {
     "miss-handled",
     "wp-wait",
     "wp-handled",
+    "no-fault-needed",
 };
 
 static void uffd_test_usage(const char *name)
