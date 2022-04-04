@@ -94,10 +94,11 @@ static void uffd_test_usage(const char *name)
     exit(0);
 }
 
-static inline void event_set(uint64_t addr, uffd_status status)
+static inline void event_set(uint64_t addr, uffd_status _status)
 {
     uffd_test_ctx.target_addr = addr;
-    uffd_test_ctx.status = status;
+    uffd_test_ctx.status = _status;
+    printf("Event set to %s for addr 0x%"PRIx64"\n", status[_status], addr);
 }
 
 static inline void event_check(uint64_t addr, uffd_status cur)
@@ -108,8 +109,9 @@ static inline void event_check(uint64_t addr, uffd_status cur)
     }
 
     if (uffd_test_ctx.status != cur) {
-        err("%s: Unexpected uffd status (%s, rather than %s)\n",
-            __func__, status[cur], status[uffd_test_ctx.status]);
+        err("%s: Unexpected uffd status for address 0x%"PRIx64
+            ", (expect %s, rather than %s)\n",
+            __func__, addr, status[cur], status[uffd_test_ctx.status]);
     }
 
     printf("Event check successful on addr 0x%"PRIx64" status %s\n",
@@ -458,17 +460,6 @@ int uffd_do_write_protect(void)
 
     printf("======================\n");
 
-    for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
-        x = page_info[i][0];
-        printf("Page %d %s", i, wp_prefault_str[x]);
-        if (page_info[i][1]) {
-            printf(", wr-protected");
-        }
-        printf("\n");
-    }
-
-    printf("======================\n");
-
     /* Make sure the poll thread prints after this */
     fflush(stdout);
 
@@ -500,12 +491,21 @@ void uffd_test_stop(void)
 
 void uffd_test_loop(void)
 {
-    int i;
+    int i, x;
     unsigned int *ptr;
     uffd_status expected;
 
     for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
-        printf("writting to page %d\n", i);
+        x = page_info[i][0];
+        printf("Writting to page %d");
+        if (test_name == TEST_WP) {
+            printf(", which is %sed", i, wp_prefault_str[x]);
+            if (page_info[i][1]) {
+                printf(" and wr-protected");
+            }
+        }
+        printf("\n");
+
         ptr = uffd_buffer + i * page_size;
 
         /* Setup what we expect to trigger */
