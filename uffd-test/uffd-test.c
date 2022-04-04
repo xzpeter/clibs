@@ -369,15 +369,17 @@ static int uffd_test_init(void)
     return 0;
 }
 
+/* read-prefault must be at the end; shmem will not test this case */
 enum {
     WP_PREFAULT_NONE = 0,
-    WP_PREFAULT_READ,
     WP_PREFAULT_WRITE,
+    WP_PREFAULT_READ,
     WP_PREFAULT_MAX,
 };
 
+/* read-prefault must be at the end; shmem will not test this case */
 char *wp_prefault_str[WP_PREFAULT_MAX] = {
-    "no-prefault", "read-prefault", "write-prefault"
+    "no-prefault", "write-prefault","read-prefault"
 };
 
 /*
@@ -395,9 +397,9 @@ unsigned char page_info[UFFD_BUFFER_PAGES][2];
 uffd_status wp_expected[WP_PREFAULT_MAX][2] = {
     /* prefault-none */
     { STATUS_MISSING_WAITING, STATUS_MISSING_WAITING },
-    /* prefault-read */
-    { STATUS_NO_FAULT, STATUS_WP_WAITING },
     /* prefault-write */
+    { STATUS_NO_FAULT, STATUS_WP_WAITING },
+    /* prefault-read, must be at the end */
     { STATUS_NO_FAULT, STATUS_WP_WAITING },
 };
 
@@ -405,11 +407,35 @@ int uffd_do_write_protect(void)
 {
     struct uffdio_writeprotect wp;
     char buf, *ptr, x;
-    int i;
+    int i, t, prefault_max = WP_PREFAULT_MAX;
+
+    if (mem_type == MEM_SHMEM) {
+        /*
+         * For shmem, don't test prefault-read because it's harder to
+         * predict in that case for swapping case.
+         *
+         * Let's imagine we do read-prefault on a page and wr-protect it.
+         * If without swap we should expect the next write to trigger a
+         * write-protect fault, but when the page is swapped out the kernel
+         * will see that the page has PageDirty()==false hence the page can
+         * be directly released.  Then when the addr is written again
+         * instead of a wp-fault we'll see a missing fault.
+         *
+         * This should normally not happening with uffd applications
+         * because in these apps they either do UFFDIO_COPY so dirty bit
+         * will always set, and page caches will never be released like
+         * above.  Or if with pure uffd-wp only we'll simply ignore the
+         * wp message if it's a pure zero page due to it's never written.
+         * To make this test case simple, just ignore the read prefault but
+         * only for shmem (because anon and hugetlbfs are all predictable).
+         */
+        prefault_max -= 1;
+    }
 
     for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
-        page_info[i][0] = random() % WP_PREFAULT_MAX;
-        page_info[i][1] = random() % 2;
+        t = random();
+        page_info[i][1] = t & 1;
+        page_info[i][0] = (t>>1) % prefault_max;
     }
 
     /*
