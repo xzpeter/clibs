@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define  MEM_SIZE  (1UL << 30)
 
@@ -67,22 +68,34 @@ void bind(int node)
     }
 }
 
-void do_reads(void)
+void do_rw(bool write)
 {
     uint64_t t1;
     int i;
 
-    for (i = 0; i < 5; i++) {
-        t1 = get_usec();
+    t1 = get_usec();
+    if (write)
+        write_once();
+    else
         read_once();
-        t1 = get_usec() - t1;
-        printf("Read (node 0) took %"PRIu64" (us)\n", t1);
-    }
+    t1 = get_usec() - t1;
+    printf("%s (node 0) took %"PRIu64" (us)\n",
+            write ? "Write" : "Read", t1);
+}
+
+void do_bind(int n)
+{
+    uint64_t t1;
+
+    t1 = get_usec();
+    bind(n);
+    t1 = get_usec() - t1;
+    printf("Move to node %d took %"PRIu64 "(us)\n", n, t1);
 }
 
 int main(void)
 {
-    uint64_t t1;
+    int i = 0;
 
     psize = getpagesize();
     map = mmap(NULL, MEM_SIZE, PROT_READ|PROT_WRITE,
@@ -90,24 +103,18 @@ int main(void)
     assert(map != MAP_FAILED);
     bind(0);
 
-    t1 = get_usec();
-    write_once();
-    t1 = get_usec() - t1;
-    printf("Write (node 0) took %"PRIu64" (us)\n", t1);
+    /* Write once, then read once */
+    do_rw(1);
+    do_rw(0);
 
-    do_reads();
+    do_bind(1);
+    do_bind(0);
 
-    t1 = get_usec();
-    bind(1);
-    t1 = get_usec() - t1;
-    printf("Move to node 1 took %"PRIu64 "(us)\n", t1);
-
-    t1 = get_usec();
-    bind(0);
-    t1 = get_usec() - t1;
-    printf("Move to node 0 took %"PRIu64 "(us)\n", t1);
-
-    do_reads();
+    /* First read (test young bit), then write (test dirty bit) */
+    for (i = 0; i < 5; i++) {
+        do_rw(0);
+        do_rw(1);
+    }
 
     munmap(map, MEM_SIZE);
     return 0;
