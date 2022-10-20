@@ -2,3 +2,4 @@ capget
 vma-merge
 volatile-test
 ioctl_tty
+pageout
