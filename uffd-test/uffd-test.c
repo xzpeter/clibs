@@ -524,9 +524,9 @@ void uffd_test_loop(void)
 
     for (i = 0; i < UFFD_BUFFER_PAGES; i++) {
         x = page_info[i][0];
-        printf("Writting to page %d");
+        printf("Writting to page %d", i);
         if (test_name == TEST_WP) {
-            printf(", which is %sed", i, wp_prefault_str[x]);
+            printf(", which is %sed", wp_prefault_str[x]);
             if (page_info[i][1]) {
                 printf(" and wr-protected");
             }
