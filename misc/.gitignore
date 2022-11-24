@@ -3,3 +3,4 @@ vma-merge
 volatile-test
 ioctl_tty
 pageout
+hugetlb-pmd-share

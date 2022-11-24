@@ -1,1 +1,2 @@
+LDFLAGS = -lpthread
 %: %.o

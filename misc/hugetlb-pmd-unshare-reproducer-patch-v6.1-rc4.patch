@@ -1,0 +1,30 @@
+From 989a96775f1d8ec992179efb1edac4925ca14016 Mon Sep 17 00:00:00 2001
+From: Peter Xu <peterx@redhat.com>
+Date: Thu, 24 Nov 2022 17:18:21 -0500
+Subject: [PATCH] debug: slow down hugetlb gup for 2sec withhold
+Content-type: text/plain
+
+Signed-off-by: Peter Xu <peterx@redhat.com>
+---
+ mm/hugetlb.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index bc759d2debfe..e0bc55bed23c 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -6309,6 +6309,11 @@ long follow_hugetlb_page(struct mm_struct *mm, struct vm_area_struct *vma,
+ 		 */
+ 		pte = huge_pte_offset(mm, vaddr & huge_page_mask(h),
+ 				      huge_page_size(h));
++
++		pr_info("%s: withhold 2 sec...\n", __func__);
++		schedule_timeout_interruptible(2000);
++		pr_info("%s: withhold 2 sec...done\n", __func__);
++
+ 		if (pte)
+ 			ptl = huge_pte_lock(h, mm, pte);
+ 		absent = !pte || huge_pte_none(huge_ptep_get(pte));
+-- 
+2.37.3
+
