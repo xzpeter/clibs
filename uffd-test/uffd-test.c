@@ -19,6 +19,15 @@
 #include <sys/eventfd.h>
 #include <linux/userfaultfd.h>
 #include <inttypes.h>
+#include <linux/types.h>
+
+#ifndef USERFAULTFD_IOC
+/* ioctls for /dev/userfaultfd */
+#define USERFAULTFD_IOC 0xAA
+#define USERFAULTFD_IOC_NEW _IO(USERFAULTFD_IOC, 0x00)
+#endif
+
+#define USE_DEV_UFFD
 
 typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
@@ -132,8 +141,21 @@ static int uffd_handle_init(void)
 {
     struct uffdio_api api_struct = { 0 };
     uint64_t ioctl_mask = BIT(_UFFDIO_REGISTER) | BIT(_UFFDIO_UNREGISTER);
+    int ufd;
 
-    int ufd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
+#ifdef USE_DEV_UFFD
+    int dev = open("/dev/userfaultfd", O_RDWR);
+
+    if (dev < 0) {
+        printf("Failed to open /dev/userfaultfd!\n");
+        return -1;
+    }
+
+    ufd = ioctl(dev, USERFAULTFD_IOC_NEW, O_CLOEXEC | O_NONBLOCK);
+    close(dev);
+#else
+    ufd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
+#endif
 
     if (ufd == -1) {
         printf("%s: UFFD not supported", __func__);
