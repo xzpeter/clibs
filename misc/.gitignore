@@ -4,3 +4,4 @@ volatile-test
 ioctl_tty
 pageout
 hugetlb-pmd-share
+swapout-full
