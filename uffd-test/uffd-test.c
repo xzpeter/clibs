@@ -21,6 +21,8 @@
 #include <inttypes.h>
 #include <linux/types.h>
 
+#include "libuffd.h"
+
 #ifndef USERFAULTFD_IOC
 /* ioctls for /dev/userfaultfd */
 #define USERFAULTFD_IOC 0xAA
@@ -29,23 +31,8 @@
 
 #define USE_DEV_UFFD
 
-typedef unsigned int bool;
 #define BIT(nr)                 (1ULL << (nr))
 #define UFFD_BUFFER_PAGES  (32)
-
-#define _err(fmt, ...)                                  \
-    do {                                                \
-        int ret = errno;                                \
-        fprintf(stderr, "ERROR: " fmt, ##__VA_ARGS__);	\
-        fprintf(stderr, " (errno=%d, line=%d)\n",       \
-                ret, __LINE__);                         \
-	} while (0)
-
-#define err(fmt, ...)                           \
-	do {                                        \
-		_err(fmt, ##__VA_ARGS__);               \
-		exit(1);                                \
-	} while (0)
 
 enum {
     TEST_MISSING = 0,

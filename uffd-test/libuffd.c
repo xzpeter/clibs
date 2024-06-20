@@ -133,3 +133,17 @@ int uffd_poison(int uffd, void *addr, uint64_t len)
 
     return 0;
 }
+
+int uffd_wp(int uffd, void *addr, uint64_t len)
+{
+    struct uffdio_writeprotect args = {
+        .range.start = (uint64_t) addr,
+        .range.len = (uint64_t) len,
+        .mode = UFFDIO_WRITEPROTECT_MODE_WP,
+    };
+
+    if (ioctl(uffd, UFFDIO_WRITEPROTECT, &args))
+        return -errno;
+
+    return 0;
+}

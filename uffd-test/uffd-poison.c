@@ -3,22 +3,6 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define _err(fmt, ...)                                  \
-    do {                                                \
-        int ret = errno;                                \
-        fprintf(stderr, "ERROR: " fmt, ##__VA_ARGS__);	\
-        fprintf(stderr, " (errno=%d, @%s:%d)\n",        \
-                ret, __FILE__, __LINE__);               \
-    } while (0)
-
-#define errexit(exitcode, fmt, ...)             \
-    do {                                        \
-        _err(fmt, ##__VA_ARGS__);               \
-        exit(exitcode);                         \
-    } while (0)
-
-#define err(fmt, ...) errexit(1, fmt, ##__VA_ARGS__)
-
 int main(void)
 {
     unsigned int psize = getpagesize();
