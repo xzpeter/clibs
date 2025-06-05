@@ -7,3 +7,4 @@ hugetlb-pmd-share
 swapout-full
 brk-mmap
 dax
+vfio-pci-nofix
